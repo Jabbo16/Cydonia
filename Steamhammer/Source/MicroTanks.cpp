@@ -1,11 +1,7 @@
 #include "MicroTanks.h"
 #include "UnitUtil.h"
-#include <BWAPI/Unit.h>
-#include <BWAPI/Player.h>
 
 using namespace UAlbertaBot;
-
-namespace { auto & bwemMap = BWEM::Map::Instance(); }
 
 MicroTanks::MicroTanks() 
 { 
@@ -18,37 +14,34 @@ void MicroTanks::executeMicro(const BWAPI::Unitset & targets)
 	// figure out targets
 	BWAPI::Unitset tankTargets;
     std::copy_if(targets.begin(), targets.end(), std::inserter(tankTargets, tankTargets.end()), 
-                 [](const BWAPI::Unit u){ return u->isVisible() && !u->isFlying(); });
-
-	const auto siegeTankRange = BWAPI::UnitTypes::Terran_Siege_Tank_Siege_Mode.groundWeapon().maxRange() - 8;
+                 [](BWAPI::Unit u){ return u->isVisible() && !u->isFlying(); });
+    
+    int siegeTankRange = BWAPI::UnitTypes::Terran_Siege_Tank_Siege_Mode.groundWeapon().maxRange() - 8;
 
 	for (const auto tank : tanks)
 	{
-        bool tankNearChokepoint = false;
-		const BWEM::Area* area = bwemMap.GetArea(tank->getTilePosition());
-		if(area)
-		{
-			for (auto & choke : area->ChokePoints())
-			{
-				if (BWAPI::Position(choke->Center()).getDistance(tank->getPosition()) < 64)
-				{
-					tankNearChokepoint = true;
-					break;
-				}
-			}
-		}
+        bool tankNearChokepoint = false; 
+        for (auto & choke : BWTA::getChokepoints())
+        {
+            if (choke->getCenter().getDistance(tank->getPosition()) < 64)
+            {
+                tankNearChokepoint = true;
+                break;
+            }
+        }
+
 		if (order.isCombatOrder())
 		{
 			if (!tankTargets.empty())
 			{
-				const auto target = getTarget(tank, tankTargets);
+				BWAPI::Unit target = getTarget(tank, tankTargets);
 
 				if (target && Config::Debug::DrawUnitTargetInfo)
 				{
 					BWAPI::Broodwar->drawLineMap(tank->getPosition(), tank->getTargetPosition(), BWAPI::Colors::Purple);
 				}
 
-				auto shouldSiege = tank->canSiege() && !tankNearChokepoint;
+				bool shouldSiege = tank->canSiege() && !tankNearChokepoint;
 
 				if (target)
 				{
@@ -73,7 +66,7 @@ void MicroTanks::executeMicro(const BWAPI::Unitset & targets)
 					}
 				}
 
-				const auto shouldUnsiege =
+				bool shouldUnsiege =
 					target && tank->getDistance(target) < 64 ||					// target is too close
 					target && tank->getDistance(target) > siegeTankRange ||		// target is too far away
 					tank->isUnderDisruptionWeb();
@@ -126,11 +119,11 @@ void MicroTanks::executeMicro(const BWAPI::Unitset & targets)
 
 BWAPI::Unit MicroTanks::getTarget(BWAPI::Unit tank, const BWAPI::Unitset & targets)
 {
-	auto highPriority = 0;
-	auto closestDist = 99999;
+    int highPriority = 0;
+	int closestDist = 99999;
 	BWAPI::Unit closestTarget = nullptr;
 
-	const auto siegeTankRange = BWAPI::UnitTypes::Terran_Siege_Tank_Siege_Mode.groundWeapon().maxRange() - 8;
+    int siegeTankRange = BWAPI::UnitTypes::Terran_Siege_Tank_Siege_Mode.groundWeapon().maxRange() - 8;
     BWAPI::Unitset targetsInSiegeRange;
     for (const auto target : targets)
     {
@@ -146,8 +139,8 @@ BWAPI::Unit MicroTanks::getTarget(BWAPI::Unit tank, const BWAPI::Unitset & targe
     // choose the highest priority one from them at the lowest health
     for (const auto target : newTargets)
     {
-	    const auto distance = tank->getDistance(target);
-	    const auto priority = getAttackPriority(tank, target);
+        int distance = tank->getDistance(target);
+        int priority = getAttackPriority(tank, target);
 
 		if (!closestTarget || (priority > highPriority) || (priority == highPriority && distance < closestDist))
 		{
@@ -177,7 +170,7 @@ int MicroTanks::getAttackPriority(BWAPI::Unit tank, BWAPI::Unit target)
 	}
 
 	// if the target is building something near our base something is fishy
-	const auto ourBasePosition = BWAPI::Position(BWAPI::Broodwar->self()->getStartLocation());
+	BWAPI::Position ourBasePosition = BWAPI::Position(BWAPI::Broodwar->self()->getStartLocation());
 	if (target->getType().isWorker() && (target->isConstructing() || target->isRepairing()) && target->getDistance(ourBasePosition) < 1200)
 	{
 		return 12;
@@ -188,7 +181,7 @@ int MicroTanks::getAttackPriority(BWAPI::Unit tank, BWAPI::Unit target)
 		return 12;
 	}
 
-	auto isThreat = UnitUtil::TypeCanAttackGround(targetType);    // includes bunkers
+	bool isThreat = UnitUtil::TypeCanAttackGround(targetType);    // includes bunkers
 	if (target->getType().isWorker())
 	{
 		isThreat = false;

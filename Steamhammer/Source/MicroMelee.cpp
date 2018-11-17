@@ -94,8 +94,18 @@ void MicroMelee::assignTargets(const BWAPI::Unitset & targets)
 			// run away if we meet the retreat criterion
             if (meleeUnitShouldRetreat(meleeUnit, targets))
             {
-				BWAPI::Position fleeTo(BWAPI::Position(InformationManager::Instance().getMyMainBaseLocation()->Location()));
-				Micro::Move(meleeUnit, fleeTo);
+				BWAPI::Unit shieldBattery = InformationManager::Instance().nearestShieldBattery(meleeUnit->getPosition());
+				if (shieldBattery &&
+					meleeUnit->getDistance(shieldBattery) < 400 &&
+					shieldBattery->getEnergy() >= 10)
+				{
+					useShieldBattery(meleeUnit, shieldBattery);
+				}
+				else
+				{
+					BWAPI::Position fleeTo(InformationManager::Instance().getMyMainBaseLocation()->getPosition());
+					Micro::Move(meleeUnit, fleeTo);
+				}
             }
 			else
 			{
@@ -124,6 +134,7 @@ void MicroMelee::assignTargets(const BWAPI::Unitset & targets)
 
                     // Otherwise, maybe add it to a bunker attack squad
                     else if (!StrategyManager::Instance().isRushing() ||
+                        order.getType() == SquadOrderTypes::KamikazeAttack ||
                         !squad.addUnitToBunkerAttackSquadIfClose(meleeUnit))
                     {
                         // Neither are appropriate, move towards the order position
@@ -168,7 +179,7 @@ BWAPI::Unit MicroMelee::getTarget(BWAPI::Unit meleeUnit, const BWAPI::Unitset & 
 		int score = 2 * 32 * priority - range;
 
         // Kamikaze and rush attacks ignore all tier 2+ combat units
-        if (StrategyManager::Instance().isRushing() &&
+        if ((StrategyManager::Instance().isRushing() || order.getType() == SquadOrderTypes::KamikazeAttack) &&
             UnitUtil::IsCombatUnit(target) && 
             !UnitUtil::IsTierOneCombatUnit(target->getType())
             && !target->getType().isWorker())

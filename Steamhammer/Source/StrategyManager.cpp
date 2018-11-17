@@ -5,8 +5,6 @@
 #include "ScoutManager.h"
 #include "StrategyBossZerg.h"
 #include "UnitUtil.h"
-#include <BWAPI/Player.h>
-#include <BWAPI/TechType.h>
 
 using namespace UAlbertaBot;
 
@@ -99,11 +97,11 @@ const bool StrategyManager::shouldExpandNow() const
 		+ UnitUtil::GetAllUnitCount(BWAPI::UnitTypes::Zerg_Lair)
 		+ UnitUtil::GetAllUnitCount(BWAPI::UnitTypes::Zerg_Hive);
 
-	numDepots += BuildingManager::Instance().getNumUnstarted(BWAPI::Broodwar->self()->getRace().getResourceDepot());
+	numDepots += BuildingManager::Instance().getNumUnstarted(BWAPI::UnitTypes::Protoss_Nexus);
 
 	// if we have idle workers then we need a new expansion
 	if (WorkerManager::Instance().getNumIdleWorkers() > 10
-		|| (numDepots * 18) < UnitUtil::GetAllUnitCount(BWAPI::Broodwar->self()->getRace().getWorker()))
+		|| (numDepots * 18) < UnitUtil::GetAllUnitCount(BWAPI::UnitTypes::Protoss_Probe))
 	{
 		return true;
 	}
@@ -813,7 +811,6 @@ goal.push_back(std::pair<MacroAct, int>(BWAPI::UpgradeTypes::Terran_Infantry_Wea
 	{
 		goal.push_back(std::pair<MacroAct, int>(BWAPI::UnitTypes::Terran_Vulture, numVultures + 3));
 		goal.push_back(std::pair<MacroAct, int>(BWAPI::UpgradeTypes::Ion_Thrusters, 1));
-		goal.push_back(std::pair<MacroAct, int>(BWAPI::TechTypes::Spider_Mines, 1));
 
 		if (numVultures >= 6)
 		{
@@ -831,11 +828,11 @@ goal.push_back(std::pair<MacroAct, int>(BWAPI::UpgradeTypes::Terran_Infantry_Wea
 		{
 			goal.push_back(std::pair<MacroAct, int>(BWAPI::UpgradeTypes::Ion_Thrusters, 1));
 		}
-		if (numTanks >= BWAPI::Broodwar->enemy()->getRace() == BWAPI::Races::Zerg ? 3 : 6)
+		if (numTanks >= 6)
 		{
 			goal.push_back(std::pair<MacroAct, int>(BWAPI::UnitTypes::Terran_Goliath, numGoliaths + 4));
 		}
-		if (numGoliaths >= 3)
+		if (numGoliaths >= 4)
 		{
 			goal.push_back(std::pair<MacroAct, int>(BWAPI::UpgradeTypes::Charon_Boosters, 1));
 		}
@@ -991,9 +988,9 @@ void QueueUrgentItem(BWAPI::UnitType type, BuildOrderQueue & queue, int recursio
 
     // If the unit requires more gas than we have, and we have no assimilator, queue it first
     if (type.gasPrice() > BWAPI::Broodwar->self()->gas() 
-        && UnitUtil::GetCompletedUnitCount(BWAPI::Broodwar->self()->getRace().getRefinery()) < 1)
+        && UnitUtil::GetCompletedUnitCount(BWAPI::UnitTypes::Protoss_Assimilator) < 1)
     {
-        QueueUrgentItem(BWAPI::Broodwar->self()->getRace().getRefinery(), queue, recursions + 1);
+        QueueUrgentItem(BWAPI::UnitTypes::Protoss_Assimilator, queue, recursions + 1);
         return;
     }
 
@@ -1119,12 +1116,12 @@ bool IsInBuildingOrProductionQueue(BWAPI::TilePosition tile, BuildOrderQueue & q
     return false;
 }
 
-int EnsureCannonsAtBase(const BWEM::Base * base, int cannons, BuildOrderQueue & queue, bool queueOneAtATime = false)
+int EnsureCannonsAtBase(BWTA::BaseLocation * base, int cannons, BuildOrderQueue & queue, bool queueOneAtATime = false)
 {
     if (cannons <= 0 || !base) return 0;
 
     // Get the BWEB Station for the base
-    const BWEB::Station* station = bwebMap.getClosestStation(base->Location());
+    const BWEB::Station* station = bwebMap.getClosestStation(base->getTilePosition());
     if (!station) return 0;
 
     // If we have anything in the building or production queue for the station's defensive locations, we've already handled this base
@@ -1134,7 +1131,7 @@ int EnsureCannonsAtBase(const BWEM::Base * base, int cannons, BuildOrderQueue & 
     }
 
     // Reduce desired cannons based on what we already have in the base
-    BWAPI::Position basePosition = BWAPI::Position(base->Location());
+    BWAPI::Position basePosition = base->getPosition();
     int desiredCannons = cannons;
     for (const auto unit : BWAPI::Broodwar->self()->getUnits())
         if (unit->getType() == BWAPI::UnitTypes::Protoss_Photon_Cannon &&
@@ -1301,7 +1298,7 @@ void StrategyManager::handleUrgentProductionIssues(BuildOrderQueue & queue)
         }
 
         // Everything below this requires workers, so break now if we have none
-        if (UnitUtil::GetAllUnitCount(BWAPI::Broodwar->self()->getRace().getWorker()) < 1) return;
+        if (UnitUtil::GetAllUnitCount(BWAPI::UnitTypes::Protoss_Probe) < 1) return;
 
 		// detect if there's a supply block once per second
 		if ((BWAPI::Broodwar->getFrameCount() % 24 == 1) && detectSupplyBlock(queue))
@@ -1357,7 +1354,7 @@ void StrategyManager::handleUrgentProductionIssues(BuildOrderQueue & queue)
                 else
                 {
                     // Otherwise, put cannons at our most forward base
-                    const BWEM::Base * natural = InformationManager::Instance().getMyNaturalLocation();
+                    BWTA::BaseLocation * natural = InformationManager::Instance().getMyNaturalLocation();
                     if (natural && BWAPI::Broodwar->self() == InformationManager::Instance().getBaseOwner(natural))
                     {
                         EnsureCannonsAtBase(natural, 2, queue);
@@ -1386,149 +1383,147 @@ void StrategyManager::handleUrgentProductionIssues(BuildOrderQueue & queue)
 				}
 			}
 		}
-		if(BWAPI::Broodwar->self()->getRace() == BWAPI::Races::Protoss)
+
+		// Handle early game anti-air defense
+		if (BWAPI::Broodwar->getFrameCount() < 11000)
 		{
-			// Handle early game anti-air defense
-			if (BWAPI::Broodwar->getFrameCount() < 11000)
+			// Compute how many cannons worth of defense we want
+			int desiredCannons = 0;
+
+			// We know the enemy is getting or has air tech
+			if (InformationManager::Instance().enemyWillSoonHaveAirTech())
+				desiredCannons = 3;
+
+			// We don't have scouting, but the opponent model tells us the enemy might be getting air tech soon
+			else if (!ScoutManager::Instance().eyesOnEnemyBase() && OpponentModel::Instance().expectAirTechSoon())
+				desiredCannons = 2;
+
+			if (desiredCannons > 0)
 			{
-				// Compute how many cannons worth of defense we want
-				int desiredCannons = 0;
+                // Count the number of combat units we have that can defend against air
+                int antiAirUnits = 0;
+                for (const auto unit : BWAPI::Broodwar->self()->getUnits())
+                    if (!unit->getType().isBuilding() && UnitUtil::CanAttackAir(unit))
+                        antiAirUnits++;
 
-				// We know the enemy is getting or has air tech
-				if (InformationManager::Instance().enemyWillSoonHaveAirTech())
-					desiredCannons = 3;
-
-				// We don't have scouting, but the opponent model tells us the enemy might be getting air tech soon
-				else if (!ScoutManager::Instance().eyesOnEnemyBase() && OpponentModel::Instance().expectAirTechSoon())
-					desiredCannons = 2;
-
-				if (desiredCannons > 0)
-				{
-					// Count the number of combat units we have that can defend against air
-					int antiAirUnits = 0;
-					for (const auto unit : BWAPI::Broodwar->self()->getUnits())
-						if (!unit->getType().isBuilding() && UnitUtil::CanAttackAir(unit))
-							antiAirUnits++;
-
-					// Reduce the number of needed cannons if we have sufficient anti-air units
-					if (antiAirUnits > 3)
-						desiredCannons--;
-					if (antiAirUnits > 0)
-						desiredCannons--;
-				}
-
-				EnsureCannonsAtBase(InformationManager::Instance().getMyMainBaseLocation(), desiredCannons, queue);
+                // Reduce the number of needed cannons if we have sufficient anti-air units
+                if (antiAirUnits > 3)
+                    desiredCannons--;
+                if (antiAirUnits > 0)
+                    desiredCannons--;
 			}
 
-			// This is the enemy plan that we have seen, or if none yet, the expected enemy plan.
-			// Some checks can use the expected plan, some are better with the observed plan.
-			OpeningPlan likelyEnemyPlan = OpponentModel::Instance().getBestGuessEnemyPlan();
-
-			// Set wall cannon count depending on the enemy plan
-			if (!CombatCommander::Instance().getAggression() &&
-				BuildingPlacer::Instance().getWall().exists() &&
-				(BWAPI::Broodwar->getFrameCount() > 4000 || UnitUtil::GetAllUnitCount(BWAPI::UnitTypes::Protoss_Forge) > 0))
-			{
-				int cannons = 0;
-				int frame = BWAPI::Broodwar->getFrameCount();
-
-				// If we don't know the enemy plan, use the likely plan if:
-				// - it is FastRush, since we won't have time to react to that later
-				// - we're past frame 4500
-				auto plan =
-					(enemyPlan == OpeningPlan::Unknown && (frame > 4500 || likelyEnemyPlan == OpeningPlan::FastRush))
-					? likelyEnemyPlan
-					: enemyPlan;
-
-				// Set cannons depending on the plan
-				switch (plan)
-				{
-				case OpeningPlan::FastRush:
-					// Fast rushes need two cannons immediately and a third shortly afterwards
-					if (frame > 3000)
-						cannons = 3;
-					else
-						cannons = 2;
-
-					break;
-
-				case OpeningPlan::HeavyRush:
-					// Heavy rushes ramp up to four cannons at a bit slower timing
-					if (frame > 5000)
-						cannons = 4;
-					else if (frame > 4000)
-						cannons = 3;
-					else if (frame > 3000)
-						cannons = 2;
-
-					break;
-
-				case OpeningPlan::HydraBust:
-					// Hydra busts ramp up to five cannons at a much slower timing
-					if (frame > 8000)
-						cannons = 5;
-					else if (frame > 7000)
-						cannons = 4;
-					else if (frame > 6000)
-						cannons = 3;
-					else if (frame > 5000)
-						cannons = 2;
-
-					break;
-
-				default:
-					// We haven't scouted a dangerous plan directly
-
-					// Don't do anything if we already have the rough equivalent of a zealot and a dragoon
-					if (UnitUtil::GetCompletedUnitCount(BWAPI::UnitTypes::Protoss_Zealot)
-						+ (UnitUtil::GetCompletedUnitCount(BWAPI::UnitTypes::Protoss_Dragoon) * 2) >= 3)
-					{
-						break;
-					}
-
-					// We don't have scouting info
-					if (!ScoutManager::Instance().eyesOnEnemyBase())
-					{
-						// Build two cannons immediately if the opponent does fast rushes
-						// Otherwise, scale cannons up gradually to protect against unscouted heavy pressure
-						if (frame > 4500)
-							cannons = 3;
-						else if (frame > 4000 || OpponentModel::Instance().enemyCanFastRush())
-							cannons = 2;
-						else if (frame > 3000)
-							cannons = 1;
-						else
-							cannons = 0;
-					}
-
-					// We have a scout in the enemy base
-					else
-					{
-						PlayerSnapshot snap;
-						snap.takeEnemy();
-
-						// If a zerg enemy is relatively low on workers, prepare for some heavy pressure
-						if (frame > 5000 &&
-							BWAPI::Broodwar->enemy()->getRace() == BWAPI::Races::Zerg &&
-							snap.getCount(BWAPI::UnitTypes::Zerg_Drone) < 11)
-						{
-							if (frame > 6000)
-								cannons = 4;
-							else
-								cannons = 3;
-						}
-
-						// Otherwise scale up gradually to two cannons to handle early pressure
-						else if (frame > 4000 && InformationManager::Instance().enemyCanProduceCombatUnits())
-							cannons = 2;
-						else if (frame > 3000)
-							cannons = 1;
-					}
-				}
-
-				SetWallCannons(queue, cannons);
-			}
+            EnsureCannonsAtBase(InformationManager::Instance().getMyMainBaseLocation(), desiredCannons, queue);
 		}
+
+		// This is the enemy plan that we have seen, or if none yet, the expected enemy plan.
+		// Some checks can use the expected plan, some are better with the observed plan.
+		OpeningPlan likelyEnemyPlan = OpponentModel::Instance().getBestGuessEnemyPlan();
+
+        // Set wall cannon count depending on the enemy plan
+        if (!CombatCommander::Instance().getAggression() &&
+            BuildingPlacer::Instance().getWall().exists() &&
+            (BWAPI::Broodwar->getFrameCount() > 4000 || UnitUtil::GetAllUnitCount(BWAPI::UnitTypes::Protoss_Forge) > 0))
+        {
+            int cannons = 0;
+            int frame = BWAPI::Broodwar->getFrameCount();
+
+            // If we don't know the enemy plan, use the likely plan if:
+            // - it is FastRush, since we won't have time to react to that later
+            // - we're past frame 4500
+            auto plan = 
+                (enemyPlan == OpeningPlan::Unknown && (frame > 4500 || likelyEnemyPlan == OpeningPlan::FastRush))
+                ? likelyEnemyPlan
+                : enemyPlan;
+
+            // Set cannons depending on the plan
+            switch (plan)
+            {
+            case OpeningPlan::FastRush:
+                // Fast rushes need two cannons immediately and a third shortly afterwards
+                if (frame > 3000)
+                    cannons = 3;
+                else
+                    cannons = 2;
+
+                break;
+
+            case OpeningPlan::HeavyRush:
+                // Heavy rushes ramp up to four cannons at a bit slower timing
+                if (frame > 5000)
+                    cannons = 4;
+                else if (frame > 4000)
+                    cannons = 3;
+                else if (frame > 3000)
+                    cannons = 2;
+
+                break;
+
+            case OpeningPlan::HydraBust:
+                // Hydra busts ramp up to five cannons at a much slower timing
+                if (frame > 8000)
+                    cannons = 5;
+                else if (frame > 7000)
+                    cannons = 4;
+                else if (frame > 6000)
+                    cannons = 3;
+                else if (frame > 5000)
+                    cannons = 2;
+
+                break;
+
+            default:
+                // We haven't scouted a dangerous plan directly
+
+                // Don't do anything if we already have the rough equivalent of a zealot and a dragoon
+                if (UnitUtil::GetCompletedUnitCount(BWAPI::UnitTypes::Protoss_Zealot) 
+                    + (UnitUtil::GetCompletedUnitCount(BWAPI::UnitTypes::Protoss_Dragoon) * 2) >= 3)
+                {
+                    break;
+                }
+
+                // We don't have scouting info
+                if (!ScoutManager::Instance().eyesOnEnemyBase())
+                {
+                    // Build two cannons immediately if the opponent does fast rushes
+                    // Otherwise, scale cannons up gradually to protect against unscouted heavy pressure
+                    if (frame > 4500)
+                        cannons = 3;
+                    else if (frame > 4000 || OpponentModel::Instance().enemyCanFastRush())
+                        cannons = 2;
+                    else if (frame > 3000)
+                        cannons = 1;
+                    else
+                        cannons = 0;
+                }
+
+                // We have a scout in the enemy base
+                else
+                {
+                    PlayerSnapshot snap;
+                    snap.takeEnemy();
+
+                    // If a zerg enemy is relatively low on workers, prepare for some heavy pressure
+                    if (frame > 5000 && 
+                        BWAPI::Broodwar->enemy()->getRace() == BWAPI::Races::Zerg && 
+                        snap.getCount(BWAPI::UnitTypes::Zerg_Drone) < 11)
+                    {
+                        if (frame > 6000)
+                            cannons = 4;
+                        else
+                            cannons = 3;
+                    }
+
+                    // Otherwise scale up gradually to two cannons to handle early pressure
+                    else if (frame > 4000 && InformationManager::Instance().enemyCanProduceCombatUnits())
+                        cannons = 2;
+                    else if (frame > 3000)
+                        cannons = 1;
+                }
+            }
+
+            SetWallCannons(queue, cannons);
+        }
 
 		if (numDepots > _highWaterBases)
 		{
@@ -1587,18 +1582,18 @@ void StrategyManager::handleMacroProduction(BuildOrderQueue & queue)
     // We don't count patches that are close to being mined out
     int mineralPatches = 0;
     for (auto & base : InformationManager::Instance().getMyBases())
-        for (auto & mineralPatch : base->Minerals())
-            if (mineralPatch->Amount() >= 50) mineralPatches++;
+        for (auto & mineralPatch : base->getStaticMinerals())
+            if (mineralPatch->getResources() >= 50) mineralPatches++;
 
     // Count our probes
-    int probes = UnitUtil::GetAllUnitCount(BWAPI::Broodwar->self()->getRace().getWorker());
+    int probes = UnitUtil::GetAllUnitCount(BWAPI::UnitTypes::Protoss_Probe);
 
     // Count the number of mineral patches needed to satisfy our current probe count
     // We subtract probes mining gas, but assume our existing nexuses will build a couple
     // of probes each before our next expansion is up
     int predictedProbes = std::min(
         WorkerManager::Instance().getMaxWorkers(),
-        probes + (2 * UnitUtil::GetCompletedUnitCount(BWAPI::Broodwar->self()->getRace().getResourceDepot())));
+        probes + (2 * UnitUtil::GetCompletedUnitCount(BWAPI::UnitTypes::Protoss_Nexus)));
     int desiredMineralPatches = (predictedProbes - WorkerManager::Instance().getNumGasWorkers()) / 2;
 
     // Are we gas blocked?
@@ -1611,19 +1606,19 @@ void StrategyManager::handleMacroProduction(BuildOrderQueue & queue)
     // - we want more active mineral patches than we currently have OR we are gas blocked
     // - we aren't currently in the middle of a rush
     if (safeToMacro &&
-        !queue.anyInQueue(BWAPI::Broodwar->self()->getRace().getResourceDepot()) &&
-        BuildingManager::Instance().getNumUnstarted(BWAPI::Broodwar->self()->getRace().getResourceDepot()) < 1 &&
+        !queue.anyInQueue(BWAPI::UnitTypes::Protoss_Nexus) && 
+        BuildingManager::Instance().getNumUnstarted(BWAPI::UnitTypes::Protoss_Nexus) < 1 &&
         (mineralPatches < desiredMineralPatches || gasBlocked) &&
         !isRushing())
     {
         // Double-check that there is actually a place to expand to
         if (MapTools::Instance().getNextExpansion(false, true, false) != BWAPI::TilePositions::None)
         {
-            Log().Get() << "Expanding: " << mineralPatches << " active mineral patches, " << probes << " probes, " << UnitUtil::GetAllUnitCount(BWAPI::Broodwar->self()->getRace().getResourceDepot()) << " nexuses";
+            Log().Get() << "Expanding: " << mineralPatches << " active mineral patches, " << probes << " probes, " << UnitUtil::GetAllUnitCount(BWAPI::UnitTypes::Protoss_Nexus) << " nexuses";
             if (WorkerManager::Instance().isCollectingGas())
-                queue.queueAsLowestPriority(BWAPI::Broodwar->self()->getRace().getResourceDepot());
+                queue.queueAsLowestPriority(BWAPI::UnitTypes::Protoss_Nexus);
             else
-                queue.queueAsLowestPriority(MacroAct(BWAPI::Broodwar->self()->getRace().getResourceDepot(), MacroLocation::MinOnly));
+                queue.queueAsLowestPriority(MacroAct(BWAPI::UnitTypes::Protoss_Nexus, MacroLocation::MinOnly));
         }
     }
 
@@ -1631,7 +1626,7 @@ void StrategyManager::handleMacroProduction(BuildOrderQueue & queue)
     // - we are already oversaturated
     // - we are close to maxed and have a large mineral bank
     // - we are rushing and already have two workers on each patch, plus one extra to build stuff
-    if (!queue.anyInQueue(BWAPI::Broodwar->self()->getRace().getWorker())
+    if (!queue.anyInQueue(BWAPI::UnitTypes::Protoss_Probe)
         && probes < WorkerManager::Instance().getMaxWorkers()
         && WorkerManager::Instance().getNumIdleWorkers() < 5
         && (BWAPI::Broodwar->self()->supplyUsed() < 350 || BWAPI::Broodwar->self()->minerals() < 1500)
@@ -1639,54 +1634,54 @@ void StrategyManager::handleMacroProduction(BuildOrderQueue & queue)
     {
         bool idleNexus = false;
         for (const auto unit : BWAPI::Broodwar->self()->getUnits())
-            if (unit->isCompleted() && unit->getType() == BWAPI::Broodwar->self()->getRace().getResourceDepot() && unit->getRemainingTrainTime() == 0)
+            if (unit->isCompleted() && unit->getType() == BWAPI::UnitTypes::Protoss_Nexus && unit->getRemainingTrainTime() == 0)
                 idleNexus = true;
 
         if (idleNexus)
-            queue.queueAsLowestPriority(BWAPI::Broodwar->self()->getRace().getWorker());
+            queue.queueAsLowestPriority(BWAPI::UnitTypes::Protoss_Probe);
     }
 
     // If we are mining gas, make sure we've taken the geysers at our mining bases
     // They usually get ordered automatically, so don't do this too often unless we are gas blocked
     if ((gasBlocked || BWAPI::Broodwar->getFrameCount() % (10 * 24) == 0) &&
         WorkerManager::Instance().isCollectingGas() &&
-        UnitUtil::GetAllUnitCount(BWAPI::Broodwar->self()->getRace().getResourceDepot()) > 1 &&
-        !queue.anyInQueue(BWAPI::Broodwar->self()->getRace().getRefinery()) &&
-        BuildingManager::Instance().getNumUnstarted(BWAPI::Broodwar->self()->getRace().getRefinery()) < 1)
+        UnitUtil::GetAllUnitCount(BWAPI::UnitTypes::Protoss_Nexus) > 1 &&
+        !queue.anyInQueue(BWAPI::UnitTypes::Protoss_Assimilator) &&
+        BuildingManager::Instance().getNumUnstarted(BWAPI::UnitTypes::Protoss_Assimilator) < 1)
     {
         std::set<BWAPI::TilePosition> assimilators;
         for (auto unit : BWAPI::Broodwar->self()->getUnits())
         {
-            if (unit->getType() != BWAPI::Broodwar->self()->getRace().getRefinery()) continue;
+            if (unit->getType() != BWAPI::UnitTypes::Protoss_Assimilator) continue;
             assimilators.insert(unit->getTilePosition());
         }
 
-        for (const auto& base : InformationManager::Instance().getMyBases())
+        for (auto base : InformationManager::Instance().getMyBases())
         {
             // Don't bother if the base doesn't have gas or the geyser is already mined out
-            if (base->Geysers().empty() || base->Geysers().front()->Amount() < 100) continue;
+            if (base->gas() < 100) continue;
 
             // Find the nexus
-            auto units = BWAPI::Broodwar->getUnitsOnTile(base->Location());
+            auto units = BWAPI::Broodwar->getUnitsOnTile(base->getTilePosition());
             if (units.size() != 1) continue;
 
             BWAPI::Unit nexus = *units.begin();
-            if (nexus->getType() != BWAPI::Broodwar->self()->getRace().getResourceDepot()) continue;
+            if (nexus->getType() != BWAPI::UnitTypes::Protoss_Nexus) continue;
             
             // Try to time it so the nexus completes a bit before the assimilator
             if (!nexus->isCompleted() &&
-                nexus->getRemainingBuildTime() > BWAPI::Broodwar->self()->getRace().getRefinery().buildTime())
+                nexus->getRemainingBuildTime() > BWAPI::UnitTypes::Protoss_Assimilator.buildTime())
             {
                 continue;
             }
 
-            for (auto& geyser : base->Geysers())
+            for (auto geyser : base->getGeysers())
             {
-                if (assimilators.find(geyser->TopLeft()) == assimilators.end() &&
-                    !BuildingPlacer::Instance().isReserved(geyser->TopLeft().x, geyser->TopLeft().y))
+                if (assimilators.find(geyser->getTilePosition()) == assimilators.end() &&
+                    !BuildingPlacer::Instance().isReserved(geyser->getTilePosition().x, geyser->getTilePosition().y))
                 {
-                    MacroAct m(BWAPI::Broodwar->self()->getRace().getRefinery());
-                    m.setReservedPosition(geyser->TopLeft());
+                    MacroAct m(BWAPI::UnitTypes::Protoss_Assimilator);
+                    m.setReservedPosition(geyser->getTilePosition());
                     queue.queueAsLowestPriority(m);
                     return;
                 }
@@ -1699,31 +1694,28 @@ void StrategyManager::handleMacroProduction(BuildOrderQueue & queue)
     // - our gateways or stargates are busy
     // - we are close to maxed
     // - we have a large mineral bank
-    if(BWAPI::Broodwar->self()->getRace() == BWAPI::Races::Protoss)
+    if (BWAPI::Broodwar->getFrameCount() % (10 * 24) == 0 &&
+        safeToMacro &&
+        UnitUtil::GetCompletedUnitCount(BWAPI::UnitTypes::Protoss_Forge) > 0 &&
+        (BWAPI::Broodwar->self()->minerals() > 1500 ||
+            BWAPI::Broodwar->self()->supplyUsed() > 350 || 
+            getProductionSaturation(BWAPI::UnitTypes::Protoss_Gateway) > 0.5 || 
+            getProductionSaturation(BWAPI::UnitTypes::Protoss_Stargate) > 0.5))
     {
-		if (BWAPI::Broodwar->getFrameCount() % (10 * 24) == 0 &&
-			safeToMacro &&
-			UnitUtil::GetCompletedUnitCount(BWAPI::UnitTypes::Protoss_Forge) > 0 &&
-			(BWAPI::Broodwar->self()->minerals() > 1500 ||
-				BWAPI::Broodwar->self()->supplyUsed() > 350 ||
-				getProductionSaturation(BWAPI::UnitTypes::Protoss_Gateway) > 0.5 ||
-				getProductionSaturation(BWAPI::UnitTypes::Protoss_Stargate) > 0.5))
-		{
-			int totalQueued = 0;
+        int totalQueued = 0;
 
-			for (const auto& base : InformationManager::Instance().getMyBases())
-			{
-				// We assume the main (and natural, if it has a wall) are well-enough defended
-				// unless the enemy has air combat units
-				if (!InformationManager::Instance().enemyHasAirCombatUnits() &&
-					(base == InformationManager::Instance().getMyMainBaseLocation() ||
-					(base == InformationManager::Instance().getMyNaturalLocation() &&
-						BuildingPlacer::Instance().getWall().exists()))) continue;
+        for (auto base : InformationManager::Instance().getMyBases())
+        {
+            // We assume the main (and natural, if it has a wall) are well-enough defended
+            // unless the enemy has air combat units
+            if (!InformationManager::Instance().enemyHasAirCombatUnits() &&
+                (base == InformationManager::Instance().getMyMainBaseLocation() ||
+                    (base == InformationManager::Instance().getMyNaturalLocation() &&
+                        BuildingPlacer::Instance().getWall().exists()))) continue;
 
-				totalQueued += EnsureCannonsAtBase(base, 2, queue, true);
-				if (totalQueued > 2) break;
-			}
-		}
+            totalQueued += EnsureCannonsAtBase(base, 2, queue, true);
+            if (totalQueued > 2) break;
+        }
     }
 }
 

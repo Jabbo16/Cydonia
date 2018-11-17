@@ -4,7 +4,6 @@
 #include "CombatCommander.h"
 #include "MathUtil.h"
 #include "PathFinding.h"
-#include <BWAPI/Unit.h>
 
 const double pi = 3.14159265358979323846;
 
@@ -81,7 +80,8 @@ bool isDragoonWalkable(BWAPI::Position position)
 std::vector<BWAPI::TilePosition> getReservedPath(BWAPI::Position bunkerPosition)
 {
     // Get the BWEM path to the bunker
-    auto& chokes = PathFinding::GetChokePointPath(BWAPI::Position(InformationManager::Instance().getMyMainBaseLocation()->Location()),
+    auto& chokes = PathFinding::GetChokePointPath(
+        InformationManager::Instance().getMyMainBaseLocation()->getPosition(),
         bunkerPosition, 
         PathFinding::PathFindingOptions::UseNearestBWEMArea);
     if (chokes.size() < 2) return std::vector<BWAPI::TilePosition>();
@@ -116,8 +116,8 @@ bool closeToReservedPath(BWAPI::Position position, std::vector<BWAPI::TilePositi
 bool bunkerBlocksNarrowChoke(BWAPI::Position bunkerPosition)
 {
     // Get the BWEM path to the bunker
-    auto& chokes = PathFinding::GetChokePointPath(BWAPI::Position(
-        InformationManager::Instance().getMyMainBaseLocation()->Location()),
+    auto& chokes = PathFinding::GetChokePointPath(
+        InformationManager::Instance().getMyMainBaseLocation()->getPosition(),
         bunkerPosition,
         PathFinding::PathFindingOptions::UseNearestBWEMArea);
     if (chokes.size() < 2) return false;
@@ -282,7 +282,7 @@ BWAPI::Position computeRunByPosition(BWAPI::Position unitPosition, BWAPI::Positi
 
     // If the bunker is a long way from the order position, or in a different region, just use the order position
     // TODO: Could set a waypoint to minimize the amount of time spent in range of the bunker
-    if (d > 500 || bwemMap.GetArea(BWAPI::TilePosition(p0)) != bwemMap.GetArea(BWAPI::TilePosition(p1))) return orderPosition;
+    if (d > 500 || BWTA::getRegion(p0) != BWTA::getRegion(p1)) return orderPosition;
 
     // Find the points of intersection between a circle around the bunker and a circle around the order position
     // Source: http://paulbourke.net/geometry/circlesphere/tvoght.c
@@ -382,7 +382,7 @@ void MicroBunkerAttackSquad::assignUnitsToRunBy(BWAPI::Position orderPosition, b
     // - If the enemy has the marine range upgrade, 2.0 (we can't range down the bunker)
     // - If the bunker is not close to the order position, 2.5
     // - Otherwise, 3.0 (we can range down the bunker while we wait for a stronger force)
-    double healthCutoff = BWAPI::UnitTypes::Terran_Vulture.maxHitPoints();
+    double healthCutoff = BWAPI::UnitTypes::Protoss_Dragoon.maxHitPoints() + BWAPI::UnitTypes::Protoss_Dragoon.maxShields();
     if (dead < unitsDoingRunBy.size())
         healthCutoff *= 2.0;
     else if (InformationManager::Instance().enemyHasInfantryRangeUpgrade())
@@ -441,22 +441,19 @@ void MicroBunkerAttackSquad::execute(BWAPI::Position orderPosition, bool squadIs
     assignUnitsToRunBy(orderPosition, squadIsRegrouping);
 
     // Assign a firing position to ranged goons when they're close enough
-	if(BWAPI::Broodwar->self()->getRace() == BWAPI::Races::Protoss)
-	{
-		if (BWAPI::Broodwar->self()->getUpgradeLevel(BWAPI::UpgradeTypes::Singularity_Charge))
-		{
-			for (auto& unit : _units)
-			{
-				if (unit->getType() != BWAPI::UnitTypes::Protoss_Dragoon) continue;
-				if (isPerformingRunBy(unit)) continue;
-				if (unitToAssignedPosition.find(unit) != unitToAssignedPosition.end()) continue;
+    if (BWAPI::Broodwar->self()->getUpgradeLevel(BWAPI::UpgradeTypes::Singularity_Charge))
+    {
+        for (auto& unit : _units)
+        {
+            if (unit->getType() != BWAPI::UnitTypes::Protoss_Dragoon) continue;
+            if (isPerformingRunBy(unit)) continue;
+            if (unitToAssignedPosition.find(unit) != unitToAssignedPosition.end()) continue;
 
-				if (MathUtil::EdgeToEdgeDistance(BWAPI::UnitTypes::Terran_Bunker, _bunkerPosition, unit->getType(), unit->getPosition()) < 250)
-					assignToPosition(unit, std::set<BWAPI::Position>());
-			}
-		}
-	}
-    
+            if (MathUtil::EdgeToEdgeDistance(BWAPI::UnitTypes::Terran_Bunker, _bunkerPosition, unit->getType(), unit->getPosition()) < 250)
+                assignToPosition(unit, std::set<BWAPI::Position>());
+        }
+    }
+
     // Perform micro for each unit
     int unitsCloseToBunker = -1;
     for (auto& unit : _units)

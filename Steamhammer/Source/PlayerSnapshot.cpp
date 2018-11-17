@@ -6,7 +6,7 @@
 #include "PathFinding.h"
 
 using namespace UAlbertaBot;
-namespace { auto & bwemMap = BWEM::Map::Instance(); }
+
 // Is this unit type to be excluded from the game record?
 // We leave out boring units like interceptors. Larvas are interesting.
 bool PlayerSnapshot::excludeType(BWAPI::UnitType type)
@@ -94,24 +94,20 @@ void PlayerSnapshot::takeEnemy()
                 if (!enemyBase)
                 {
                     int minDistance = INT_MAX;
-					for(auto& area : bwemMap.Areas())
-					{
-						for (const auto& base : area.Bases())
-						{
-							if (!base.Starting() || &base == InformationManager::Instance().getMyMainBaseLocation()) continue;
+                    for (BWTA::BaseLocation * base : BWTA::getStartLocations())
+                    {
+                        if (base == InformationManager::Instance().getMyMainBaseLocation()) continue;
 
-							int dist = ui.lastPosition.getApproxDistance(BWAPI::Position(base.Location()));
-							if (dist < minDistance)
-							{
-								minDistance = dist;
-								enemyBase = &base;
-							}
-						}
-					}
-                    
+                        int dist = ui.lastPosition.getApproxDistance(base->getPosition());
+                        if (dist < minDistance)
+                        {
+                            minDistance = dist;
+                            enemyBase = base;
+                        }
+                    }
                 }
 
-                int distanceToMove = PathFinding::GetGroundDistance(ui.lastPosition, BWAPI::Position(enemyBase->Location()), PathFinding::PathFindingOptions::UseNearestBWEMArea);
+                int distanceToMove = PathFinding::GetGroundDistance(ui.lastPosition, enemyBase->getPosition(), PathFinding::PathFindingOptions::UseNearestBWEMArea);
                 int framesToMove = std::floor(((double)distanceToMove / ui.type.topSpeed()) * 1.1);
 
                 startFrame = BWAPI::Broodwar->getFrameCount() - framesToMove;

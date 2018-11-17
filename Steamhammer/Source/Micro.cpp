@@ -22,7 +22,6 @@ bool Micro::AlwaysKite(BWAPI::UnitType type)
 
 void Micro::Stop(BWAPI::Unit unit)
 {
-	if (unit->getType() == BWAPI::UnitTypes::Terran_Vulture && unit->getOrder() == BWAPI::Orders::PlaceMine) return;
 	if (!unit || !unit->exists() || unit->getPlayer() != BWAPI::Broodwar->self())
 	{
 		UAB_ASSERT(false, "bad arg");
@@ -431,10 +430,7 @@ void Micro::KiteTarget(BWAPI::Unit rangedUnit, BWAPI::Unit target)
 	{
 		range = 5 * 32;
 	}
-	else if (rangedUnit->getType() == BWAPI::UnitTypes::Terran_Marine && BWAPI::Broodwar->self()->getUpgradeLevel(BWAPI::UpgradeTypes::U_238_Shells))
-	{
-		range = 5 * 32;
-	}
+
 	bool kite(true);
 
     // Special case: move inside the minimum range of sieged tanks

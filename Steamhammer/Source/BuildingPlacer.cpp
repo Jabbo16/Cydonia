@@ -4,9 +4,6 @@
 #include "MapGrid.h"
 #include "MapTools.h"
 #include "PathFinding.h"
-#include <BWAPI/Unitset.h>
-#include <BWAPI/Unit.h>
-#include <BWAPI/Player.h>
 
 using namespace UAlbertaBot;
 
@@ -43,7 +40,7 @@ bool BuildingPlacer::isInResourceBox(int x, int y) const
 
 void BuildingPlacer::computeResourceBox()
 {
-    BWAPI::Position start(InformationManager::Instance().getMyMainBaseLocation()->Location());
+    BWAPI::Position start(InformationManager::Instance().getMyMainBaseLocation()->getPosition());
     BWAPI::Unitset unitsAroundNexus;
 
     for (const auto unit : BWAPI::Broodwar->getAllUnits())
@@ -223,27 +220,23 @@ bool BuildingPlacer::tileOverlapsBaseLocation(BWAPI::TilePosition tile, BWAPI::U
     int ty2 = ty1 + type.tileHeight();
 
     // for each base location
-	for(auto& area : bwemMap.Areas())
-	{
-		for (auto& base : area.Bases())
-		{
-			// dimensions of the base location
-			int bx1 = base.Location().x;
-			int by1 = base.Location().y;
-			int bx2 = bx1 + BWAPI::Broodwar->self()->getRace().getCenter().tileWidth();
-			int by2 = by1 + BWAPI::Broodwar->self()->getRace().getCenter().tileHeight();
+    for (BWTA::BaseLocation * base : BWTA::getBaseLocations())
+    {
+        // dimensions of the base location
+        int bx1 = base->getTilePosition().x;
+        int by1 = base->getTilePosition().y;
+        int bx2 = bx1 + BWAPI::Broodwar->self()->getRace().getCenter().tileWidth();
+        int by2 = by1 + BWAPI::Broodwar->self()->getRace().getCenter().tileHeight();
 
-			// conditions for non-overlap are easy
-			bool noOverlap = (tx2 < bx1) || (tx1 > bx2) || (ty2 < by1) || (ty1 > by2);
+        // conditions for non-overlap are easy
+        bool noOverlap = (tx2 < bx1) || (tx1 > bx2) || (ty2 < by1) || (ty1 > by2);
 
-			// if the reverse is true, return true
-			if (!noOverlap)
-			{
-				return true;
-			}
-		}
-	}
-    
+        // if the reverse is true, return true
+        if (!noOverlap)
+        {
+            return true;
+        }
+    }
 
     // otherwise there is no overlap
     return false;
@@ -349,7 +342,7 @@ BWAPI::TilePosition BuildingPlacer::getRefineryPosition()
 {
     BWAPI::TilePosition closestGeyser = BWAPI::TilePositions::None;
     int minGeyserDistanceFromHome = 100000;
-	BWAPI::Position homePosition = BWAPI::Position(InformationManager::Instance().getMyMainBaseLocation()->Location());
+	BWAPI::Position homePosition = InformationManager::Instance().getMyMainBaseLocation()->getPosition();
 
 	// NOTE In BWAPI 4.2.1 getStaticGeysers() has a bug affecting geysers whose refineries
 	// have been canceled or destroyed: They become inaccessible. https://github.com/bwapi/bwapi/issues/697
@@ -413,24 +406,20 @@ void BuildingPlacer::findHiddenTechBlock()
     std::set<const BWEM::Area*> areasToAvoid;
     std::set<const BWEM::Area*> areasToPreferablyAvoid;
     auto _myBase = InformationManager::Instance().getMyMainBaseLocation();
-	for(auto& area : bwemMap.Areas())
-	{
-		for (auto& base : area.Bases())
-		{
-			if (!base.Starting() || &base == _myBase) continue;
+    for (auto base : BWTA::getStartLocations())
+    {
+        if (base == _myBase) continue;
 
-			for (auto choke : PathFinding::GetChokePointPath(BWAPI::Position(base.Location()), BWAPI::Position(_myBase->Location()), PathFinding::PathFindingOptions::UseNearestBWEMArea))
-			{
-				areasToAvoid.insert(choke->GetAreas().first);
-				areasToAvoid.insert(choke->GetAreas().second);
-				for (auto area : choke->GetAreas().first->AccessibleNeighbours())
-					areasToPreferablyAvoid.insert(area);
-				for (auto area : choke->GetAreas().second->AccessibleNeighbours())
-					areasToPreferablyAvoid.insert(area);
-			}
-		}
-	}
-    
+        for (auto choke : PathFinding::GetChokePointPath(base->getPosition(), _myBase->getPosition(), PathFinding::PathFindingOptions::UseNearestBWEMArea))
+        {
+            areasToAvoid.insert(choke->GetAreas().first);
+            areasToAvoid.insert(choke->GetAreas().second);
+            for (auto area : choke->GetAreas().first->AccessibleNeighbours())
+                areasToPreferablyAvoid.insert(area);
+            for (auto area : choke->GetAreas().second->AccessibleNeighbours())
+                areasToPreferablyAvoid.insert(area);
+        }
+    }
 
     // Now find the closest location where we can build the block
     // We weight the "preferably avoid" areas so they are only selected if all other options are bad
@@ -448,13 +437,13 @@ void BuildingPlacer::findHiddenTechBlock()
             if (bwebMap.canAddBlock(tile, 5, 4))
             {
                 BWAPI::Position blockCenter = BWAPI::Position(tile) + BWAPI::Position(5 * 16, 4 * 16);
-                dist = PathFinding::GetGroundDistance(blockCenter, BWAPI::Position(_myBase->Location()), PathFinding::PathFindingOptions::UseNearestBWEMArea);
+                dist = PathFinding::GetGroundDistance(blockCenter, _myBase->getPosition(), PathFinding::PathFindingOptions::UseNearestBWEMArea);
                 if (dist == -1 || dist > 3000) continue;
             }
             else if (bwebMap.canAddBlock(tile, 8, 2))
             {
                 BWAPI::Position blockCenter = BWAPI::Position(tile) + BWAPI::Position(8 * 16, 2 * 16);
-                dist = PathFinding::GetGroundDistance(blockCenter, BWAPI::Position(_myBase->Location()), PathFinding::PathFindingOptions::UseNearestBWEMArea);
+                dist = PathFinding::GetGroundDistance(blockCenter, _myBase->getPosition(), PathFinding::PathFindingOptions::UseNearestBWEMArea);
                 if (dist == -1 || dist > 3000) continue;
             }
             else
@@ -554,31 +543,26 @@ int addProxyBlock(BWAPI::TilePosition tile)
 void BuildingPlacer::findProxyBlocks()
 {
     // Gather the possible enemy start locations
-    std::vector<const BWEM::Base*> enemyStartLocations;
+    std::vector<BWTA::BaseLocation*> enemyStartLocations;
     if (InformationManager::Instance().getEnemyMainBaseLocation())
     {
         enemyStartLocations.push_back(InformationManager::Instance().getEnemyMainBaseLocation());
     }
     else
     {
-		for(auto& area : bwemMap.Areas())
-		{
-			for (const auto& base : area.Bases())
-			{
-				if(!base.Starting()) continue;
-				if (&base == InformationManager::Instance().getMyMainBaseLocation()) continue;
-				enemyStartLocations.push_back(&base);
-			}
-		}
-        
+        for (auto base : BWTA::getStartLocations())
+        {
+            if (base == InformationManager::Instance().getMyMainBaseLocation()) continue;
+            enemyStartLocations.push_back(base);
+        }
     }
 
     // Initialize variables for scoring possible locations
     int overallDistBest = INT_MAX;
     BWAPI::TilePosition overallTileBest = BWAPI::TilePositions::Invalid;
-    std::map<const BWEM::Base*, int> distBest;
-    std::map<const BWEM::Base*, BWAPI::TilePosition> tileBest;
-    for (const auto& base : enemyStartLocations)
+    std::map<BWTA::BaseLocation*, int> distBest;
+    std::map<BWTA::BaseLocation*, BWAPI::TilePosition> tileBest;
+    for (auto base : enemyStartLocations)
     {
         distBest[base] = INT_MAX;
         tileBest[base] = BWAPI::TilePositions::Invalid;
@@ -589,7 +573,7 @@ void BuildingPlacer::findProxyBlocks()
     debug << "Finding proxy locations";
 
     // Find the best locations
-    BWAPI::Position mainPosition = BWAPI::Position(InformationManager::Instance().getMyMainBaseLocation()->Location());
+    BWAPI::Position mainPosition = InformationManager::Instance().getMyMainBaseLocation()->getPosition();
     for (int x = 0; x < BWAPI::Broodwar->mapWidth(); x++)
         for (int y = 0; y < BWAPI::Broodwar->mapHeight(); y++)
         {
@@ -616,24 +600,24 @@ void BuildingPlacer::findProxyBlocks()
             // Consider each start location
             int minDist = INT_MAX;
             int maxDist = 0;
-            for (const auto& base : enemyStartLocations)
+            for (auto base : enemyStartLocations)
             {
                 // Don't build horror gates
-                if (bwemMap.GetArea(BWAPI::WalkPosition(blockCenter)) == base->GetArea())
+                if (BWTA::getRegion(blockCenter) == base->getRegion())
                 {
                     debug << "In a base region";
                     goto nextTile;
                 }
 
                 // Compute distance, abort if it is not connected
-                int dist = PathFinding::GetGroundDistance(BWAPI::Position(base->Location()), blockCenter, PathFinding::PathFindingOptions::UseNearestBWEMArea);
+                int dist = PathFinding::GetGroundDistance(base->getPosition(), blockCenter, PathFinding::PathFindingOptions::UseNearestBWEMArea);
                 if (dist == -1)
                 {
                     debug << "Not connected";
                     goto nextTile;
                 }
 
-                debug << "dist to " << base->Location() << "=" << dist << "; ";
+                debug << "dist to " << base->getTilePosition() << "=" << dist << "; ";
 
                 // Update best distance for this base if appropriate, but don't build too close
                 // We don't want them to find the proxy early and kill it before we can make units
@@ -680,7 +664,7 @@ void BuildingPlacer::findProxyBlocks()
 
     // Add the blocks
     _centerProxyBlock = addProxyBlock(overallTileBest);
-    for (const auto& base : enemyStartLocations)
+    for (auto base : enemyStartLocations)
         _baseProxyBlocks[base] = addProxyBlock(tileBest[base]);
 
     //Log().Debug() << debug.str();

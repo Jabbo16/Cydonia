@@ -1,8 +1,6 @@
 #include "Bases.h"
 
 #include "MapTools.h"
-#include <BWAPI/Game.h>
-#include <BWAPI/Player.h>
 
 namespace UAlbertaBot
 {
@@ -70,7 +68,7 @@ BWAPI::TilePosition Bases::findBasePosition(BWAPI::Unitset resources)
 	for (BWAPI::TilePosition tile : distances.getSortedTiles())
 	{
 		// NOTE Every resource depot is the same size, 4x3 tiles.
-		if (MapTools::Instance().isBuildable(tile, BWAPI::Broodwar->self()->getRace().getResourceDepot()))
+		if (MapTools::Instance().isBuildable(tile, BWAPI::UnitTypes::Protoss_Nexus))
 		{
 			int score = baseLocationScore(tile, resources);
 			if (score < bestScore)

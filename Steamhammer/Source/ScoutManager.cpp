@@ -3,14 +3,12 @@
 #include "OpponentModel.h"
 #include "ProductionManager.h"
 #include "UnitUtil.h"
-#include <BWAPI/Unit.h>
-#include <BWAPI/Player.h>
 
 // This class is responsible for early game scouting.
 // It controls any scouting worker and scouting overlord that it is given.
 
 using namespace UAlbertaBot;
-namespace { auto & bwemMap = BWEM::Map::Instance(); }
+
 ScoutManager::ScoutManager() 
 	: _overlordScout(nullptr)
     , _workerScout(nullptr)
@@ -44,7 +42,7 @@ ScoutManager & ScoutManager::Instance()
 // Guarantee: We only set a target if the scout for the target is set.
 void ScoutManager::setScoutTargets()
 {
-	const BWEM::Base * enemyBase = InformationManager::Instance().getEnemyMainBaseLocation();
+	BWTA::BaseLocation * enemyBase = InformationManager::Instance().getEnemyMainBaseLocation();
 	if (enemyBase)
 	{
 		_overlordScoutTarget = BWAPI::TilePositions::Invalid;
@@ -125,7 +123,7 @@ bool ScoutManager::shouldScout()
 void ScoutManager::update()
 {
     // We may have active harass pylons after the scout is dead, so always update them
-    if(BWAPI::Broodwar->self()->getRace() == BWAPI::Races::Protoss) updatePylonHarassState();
+    updatePylonHarassState();
 
 	// If we're not scouting now, minimum effort.
 	if (!_workerScout && !_overlordScout)
@@ -177,7 +175,7 @@ void ScoutManager::update()
     // If the worker scout is blocked outside a wall, release it.
     if (_workerScout &&
         InformationManager::Instance().getEnemyMainBaseLocation() &&
-        InformationManager::Instance().isBehindEnemyWall(InformationManager::Instance().getEnemyMainBaseLocation()->Location()) &&
+        InformationManager::Instance().isBehindEnemyWall(InformationManager::Instance().getEnemyMainBaseLocation()->getTilePosition()) &&
         !InformationManager::Instance().isBehindEnemyWall(_workerScout->getTilePosition()))
     {
         releaseWorkerScout();
@@ -187,7 +185,7 @@ void ScoutManager::update()
     if (_workerScout && _scoutCommand == MacroCommandType::ScoutWhileSafe &&
         !InformationManager::Instance().isBehindEnemyWall(_workerScout->getTilePosition()))
     {
-        bool scoutSafe = _workerScout->getHitPoints() > _workerScout->getType().maxHitPoints() / 2;
+        bool scoutSafe = _workerScout->getHitPoints() > BWAPI::UnitTypes::Protoss_Probe.maxHitPoints() / 2;
         if (scoutSafe)
             for (const auto & unit : BWAPI::Broodwar->enemy()->getUnits())
             {
@@ -238,8 +236,8 @@ void ScoutManager::update()
 	if (_workerScout)
 	{
 		// Keep track of when we've last scouted the enemy base
-		const BWEM::Base* enemyBase = InformationManager::Instance().getEnemyMainBaseLocation();
-		if (enemyBase && bwemMap.GetArea(BWAPI::TilePosition(_workerScout->getPosition())) == enemyBase->GetArea())
+		BWTA::BaseLocation* enemyBase = InformationManager::Instance().getEnemyMainBaseLocation();
+		if (enemyBase && BWTA::getRegion(BWAPI::TilePosition(_workerScout->getPosition())) == enemyBase->getRegion())
 		{
 			_enemyBaseLastSeen = BWAPI::Broodwar->getFrameCount();
 		}
@@ -388,9 +386,11 @@ void ScoutManager::moveGroundScout(BWAPI::Unit scout)
 	}
 	else
 	{
-		const BWEM::Base * enemyBaseLocation = InformationManager::Instance().getEnemyMainBaseLocation();
-		
-		int scoutDistanceToEnemy = MapTools::Instance().getGroundTileDistance(scout->getPosition(), BWAPI::Position(enemyBaseLocation->Location()));
+		const BWTA::BaseLocation * enemyBaseLocation = InformationManager::Instance().getEnemyMainBaseLocation();
+
+		UAB_ASSERT(enemyBaseLocation, "no enemy base");
+
+		int scoutDistanceToEnemy = MapTools::Instance().getGroundTileDistance(scout->getPosition(), enemyBaseLocation->getPosition());
 		bool scoutInRangeOfenemy = scoutDistanceToEnemy <= scoutDistanceThreshold;
 
 		// we only care if the scout is under attack within the enemy region
@@ -452,7 +452,7 @@ void ScoutManager::moveAirScout(BWAPI::Unit scout)
 {
 	// get the enemy base location, if we have one
 	// Note: In case of an enemy proxy or weird map, this might be our own base. Roll with it.
-	const BWEM::Base * enemyBaseLocation = InformationManager::Instance().getEnemyMainBaseLocation();
+	const BWTA::BaseLocation * enemyBaseLocation = InformationManager::Instance().getEnemyMainBaseLocation();
 
 	if (enemyBaseLocation)
 	{
@@ -464,8 +464,8 @@ void ScoutManager::moveAirScout(BWAPI::Unit scout)
 			{
 				_scoutStatus = "Overlord to enemy base";
 			}
-			Micro::Move(_overlordScout, BWAPI::Position(enemyBaseLocation->Location()));
-			if (_overlordScout->getDistance(BWAPI::Position(enemyBaseLocation->Location())) < 8)
+			Micro::Move(_overlordScout, enemyBaseLocation->getPosition());
+			if (_overlordScout->getDistance(enemyBaseLocation->getPosition()) < 8)
 			{
 				_overlordAtEnemyBase = true;
 			}
@@ -524,7 +524,7 @@ void ScoutManager::followPerimeter()
 // false if the caller gets control.
 bool ScoutManager::gasSteal()
 {
-	const BWEM::Base * enemyBaseLocation = InformationManager::Instance().getEnemyMainBaseLocation();
+	BWTA::BaseLocation * enemyBaseLocation = InformationManager::Instance().getEnemyMainBaseLocation();
 	if (!enemyBaseLocation)
 	{
 		_gasStealStatus = "Enemy base not found";
@@ -628,12 +628,12 @@ BWAPI::Unit ScoutManager::enemyWorkerToHarass() const
 // Find an enemy geyser and return it, if there is one.
 BWAPI::Unit ScoutManager::getAnyEnemyGeyser() const
 {
-	const BWEM::Base * enemyBaseLocation = InformationManager::Instance().getEnemyMainBaseLocation();
+	BWTA::BaseLocation * enemyBaseLocation = InformationManager::Instance().getEnemyMainBaseLocation();
 
-	const auto& geysers = enemyBaseLocation->Geysers();
-	if (!geysers.empty())
+	BWAPI::Unitset geysers = enemyBaseLocation->getGeysers();
+	if (geysers.size() > 0)
 	{
-		return geysers.front()->Unit();
+		return *(geysers.begin());
 	}
 
 	return nullptr;
@@ -644,12 +644,12 @@ BWAPI::Unit ScoutManager::getAnyEnemyGeyser() const
 // If 0 we can't steal it, and if >1 then it's no use to steal one.
 BWAPI::Unit ScoutManager::getTheEnemyGeyser() const
 {
-	const BWEM::Base * enemyBaseLocation = InformationManager::Instance().getEnemyMainBaseLocation();
+	BWTA::BaseLocation * enemyBaseLocation = InformationManager::Instance().getEnemyMainBaseLocation();
 
-	const auto& geysers = enemyBaseLocation->Geysers();
+	BWAPI::Unitset geysers = enemyBaseLocation->getGeysers();
 	if (geysers.size() == 1)
 	{
-		const BWAPI::Unit geyser = geysers.front()->Unit();
+		BWAPI::Unit geyser = *(geysers.begin());
 		// If the geyser is visible, we may be able to reject it as already taken.
 		// TODO get the type from InformationManager, which may remember
 		if (!geyser->isVisible() || geyser->getType() == BWAPI::UnitTypes::Resource_Vespene_Geyser)
@@ -697,7 +697,7 @@ BWAPI::Position ScoutManager::getFleePosition()
 {
     UAB_ASSERT_WARNING(!_enemyRegionVertices.empty(), "should have enemy region vertices");
     
-	const BWEM::Base * enemyBaseLocation = InformationManager::Instance().getEnemyMainBaseLocation();
+    BWTA::BaseLocation * enemyBaseLocation = InformationManager::Instance().getEnemyMainBaseLocation();
 
     // if this is the first flee, we will not have a previous perimeter index
     if (_currentRegionVertexIndex == -1)
@@ -737,21 +737,21 @@ BWAPI::Position ScoutManager::getFleePosition()
 //      while remaining safe.
 void ScoutManager::calculateEnemyRegionVertices()
 {
-	const BWEM::Base * enemyBaseLocation = InformationManager::Instance().getEnemyMainBaseLocation();
+    BWTA::BaseLocation * enemyBaseLocation = InformationManager::Instance().getEnemyMainBaseLocation();
 
     if (!enemyBaseLocation)
     {
         return;
     }
 
-    const BWEM::Area * enemyRegion = enemyBaseLocation->GetArea();
+    BWTA::Region * enemyRegion = enemyBaseLocation->getRegion();
 
     if (!enemyRegion)
     {
         return;
     }
 
-	const BWAPI::Position enemyCenter = BWAPI::Position(enemyBaseLocation->Location()) + BWAPI::Position(64, 48);
+	const BWAPI::Position enemyCenter = BWAPI::Position(enemyBaseLocation->getTilePosition()) + BWAPI::Position(64, 48);
 
     const BWAPI::Position basePosition = BWAPI::Position(BWAPI::Broodwar->self()->getStartLocation());
     const std::vector<BWAPI::TilePosition> & closestTobase = MapTools::Instance().getClosestTilesTo(basePosition);
@@ -761,19 +761,21 @@ void ScoutManager::calculateEnemyRegionVertices()
     // check each tile position
 	for (size_t i(0); i < closestTobase.size(); ++i)
 	{
-		const auto& tp = closestTobase[i];
+		const BWAPI::TilePosition & tp = closestTobase[i];
 
-		if (bwemMap.GetArea(tp) != enemyRegion) continue;
-		
+		if (BWTA::getRegion(tp) != enemyRegion)
+		{
+			continue;
+		}
 
 		// a tile is 'on an edge' unless
 		// 1) in all 4 directions there's a tile position in the current region
 		// 2) in all 4 directions there's a buildable tile
-		const bool edge =
-			bwemMap.GetArea(BWAPI::TilePosition(tp.x + 1, tp.y)) != enemyRegion || !BWAPI::Broodwar->isBuildable(BWAPI::TilePosition(tp.x + 1, tp.y))
-			|| bwemMap.GetArea(BWAPI::TilePosition(tp.x, tp.y + 1)) != enemyRegion || !BWAPI::Broodwar->isBuildable(BWAPI::TilePosition(tp.x, tp.y + 1))
-			|| bwemMap.GetArea(BWAPI::TilePosition(tp.x - 1, tp.y)) != enemyRegion || !BWAPI::Broodwar->isBuildable(BWAPI::TilePosition(tp.x - 1, tp.y))
-			|| bwemMap.GetArea(BWAPI::TilePosition(tp.x, tp.y - 1)) != enemyRegion || !BWAPI::Broodwar->isBuildable(BWAPI::TilePosition(tp.x, tp.y - 1));
+		bool edge =
+			   BWTA::getRegion(BWAPI::TilePosition(tp.x + 1, tp.y)) != enemyRegion || !BWAPI::Broodwar->isBuildable(BWAPI::TilePosition(tp.x + 1, tp.y))
+			|| BWTA::getRegion(BWAPI::TilePosition(tp.x, tp.y + 1)) != enemyRegion || !BWAPI::Broodwar->isBuildable(BWAPI::TilePosition(tp.x, tp.y + 1))
+			|| BWTA::getRegion(BWAPI::TilePosition(tp.x - 1, tp.y)) != enemyRegion || !BWAPI::Broodwar->isBuildable(BWAPI::TilePosition(tp.x - 1, tp.y))
+			|| BWTA::getRegion(BWAPI::TilePosition(tp.x, tp.y - 1)) != enemyRegion || !BWAPI::Broodwar->isBuildable(BWAPI::TilePosition(tp.x, tp.y - 1));
 
 		// push the tiles that aren't surrounded
 		if (edge && BWAPI::Broodwar->isBuildable(tp))
@@ -1011,7 +1013,6 @@ void ScoutManager::updatePylonHarassState()
 
 bool ScoutManager::pylonHarass()
 {
-	if (BWAPI::Broodwar->self()->getRace() != BWAPI::Races::Protoss) return false;
     if (_pylonHarassState == PylonHarassStates::Finished)
     {
         BuildingManager::Instance().reserveMineralsForWorkerScout(0);
@@ -1019,7 +1020,7 @@ bool ScoutManager::pylonHarass()
     }
 
 	// If we haven't found the enemy base yet, we can't do any pylon harass
-	const BWEM::Base* enemyBase = InformationManager::Instance().getEnemyMainBaseLocation();
+    BWTA::BaseLocation* enemyBase = InformationManager::Instance().getEnemyMainBaseLocation();
     const BWEB::Station * enemyStation = InformationManager::Instance().getEnemyMainBaseStation();
     if (!enemyBase || !enemyStation) return false;
 
@@ -1028,7 +1029,7 @@ bool ScoutManager::pylonHarass()
         BWAPI::Broodwar->enemy()->getRace() == BWAPI::Races::Unknown) return false;
 
     // Wait until we are in the enemy base
-    if (bwemMap.GetArea(BWAPI::TilePosition(_workerScout->getPosition())) != enemyBase->GetArea()) return false;
+    if (BWTA::getRegion(BWAPI::TilePosition(_workerScout->getPosition())) != enemyBase->getRegion()) return false;
 
     // We don't do any pylon harass after the enemy has gotten combat units
     if (InformationManager::Instance().enemyHasCombatUnits())
@@ -1128,8 +1129,8 @@ bool ScoutManager::pylonHarass()
         for (auto patch : enemyStation->BWEMBase()->Minerals())
         {
             // Which side of the depot is the patch?
-            int diffX = patch->TopLeft().x - enemyBase->Location().x;
-            int diffY = patch->TopLeft().y - enemyBase->Location().y;
+            int diffX = patch->TopLeft().x - enemyBase->getTilePosition().x;
+            int diffY = patch->TopLeft().y - enemyBase->getTilePosition().y;
 
             // For vertically-aligned mineral fields, which column should we check?
             int x = diffX < 0 ? patch->BottomRight().x + 1 : patch->TopLeft().x - 1;
@@ -1141,7 +1142,7 @@ bool ScoutManager::pylonHarass()
                 // Place the pylon so it overlaps the depot as much as possible.
                 mannerLocations.push_back(std::make_pair(BWAPI::TilePosition(
                     x + (diffX < 0 ? 1 : -2),
-                    patch->TopLeft().y - enemyBase->Location().y > 1 ? patch->TopLeft().y - 1 : patch->TopLeft().y),
+                    patch->TopLeft().y - enemyBase->getTilePosition().y > 1 ? patch->TopLeft().y - 1 : patch->TopLeft().y),
                     patch->Unit()));
 
                 continue;
@@ -1159,7 +1160,7 @@ bool ScoutManager::pylonHarass()
                 {
                     // Place the pylon so it overlaps the depot as much as possible.
                     mannerLocations.push_back(std::make_pair(BWAPI::TilePosition(
-                        patch->BottomRight().x - enemyBase->Location().x > 1 ? patch->BottomRight().x - 1 : patch->BottomRight().x,
+                        patch->BottomRight().x - enemyBase->getTilePosition().x > 1 ? patch->BottomRight().x - 1 : patch->BottomRight().x,
                         y + (diffY < 0 ? 1 : -2)),
                         patch->Unit()));
                 }
@@ -1169,7 +1170,7 @@ bool ScoutManager::pylonHarass()
                 {
                     // Place the pylon so it overlaps the depot as much as possible.
                     mannerLocations.push_back(std::make_pair(BWAPI::TilePosition(
-                        patch->TopLeft().x - enemyBase->Location().x > 1 ? patch->TopLeft().x - 1 : patch->TopLeft().x,
+                        patch->TopLeft().x - enemyBase->getTilePosition().x > 1 ? patch->TopLeft().x - 1 : patch->TopLeft().x,
                         y + (diffY < 0 ? 1 : -2)),
                         patch->Unit()));
                 }
@@ -1182,7 +1183,7 @@ bool ScoutManager::pylonHarass()
         int bestDist = INT_MAX;
         for (auto const & mannerLocation : mannerLocations)
         {
-            int dist = (BWAPI::Position(mannerLocation.first) + BWAPI::Position(32, 32)).getApproxDistance(BWAPI::Position(enemyBase->Location()));
+            int dist = (BWAPI::Position(mannerLocation.first) + BWAPI::Position(32, 32)).getApproxDistance(enemyBase->getPosition());
             if (dist < bestDist)
             {
                 bestDist = dist;

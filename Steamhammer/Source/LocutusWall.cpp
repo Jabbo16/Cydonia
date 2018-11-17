@@ -3,8 +3,6 @@
 #include <Wall.h>
 
 #include <tuple>
-#include <BWAPI/Position.h>
-#include <BWAPI/Game.h>
 
 const double pi = 3.14159265358979323846;
 

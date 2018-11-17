@@ -1411,7 +1411,7 @@ void StrategyBossZerg::analyzeExtraDrones()
 		if (ui.type.isBuilding() &&
 			!ui.goneFromLastPosition &&		// terran building might float away
 			ui.lastPosition.isValid() &&
-			BWAPI::Position(InformationManager::Instance().getMyMainBaseLocation()->Location()).getDistance(ui.lastPosition) > 800)
+			InformationManager::Instance().getMyMainBaseLocation()->getPosition().getDistance(ui.lastPosition) > 800)
 		{
 			if (ui.type == BWAPI::UnitTypes::Zerg_Creep_Colony)
 			{

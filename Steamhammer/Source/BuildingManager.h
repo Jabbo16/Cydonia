@@ -45,7 +45,7 @@ public:
     void                update();
     void                onUnitMorph(BWAPI::Unit unit);
     void                onUnitDestroy(BWAPI::Unit unit);
-	Building &		    addTrackedBuildingTask(const ::UAlbertaBot::MacroAct& act, BWAPI::TilePosition desiredLocation, bool isWorkerScoutBuilding);
+	Building &		    addTrackedBuildingTask(const MacroAct & act, BWAPI::TilePosition desiredLocation, bool isWorkerScoutBuilding);
 	void                addBuildingTask(const MacroAct & act, BWAPI::TilePosition desiredLocation, bool isWorkerScoutBuilding);
     void                drawBuildingInformation(int x,int y);
     BWAPI::TilePosition getBuildingLocation(const Building & b);

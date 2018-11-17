@@ -37,7 +37,7 @@ void MicroCarriers::executeMicro(const BWAPI::Unitset & targets)
 		// NOTE Regrouping can cause the carriers to move away from home.
 		if (stayHomeUntilReady(carrier))
 		{
-			BWAPI::Position fleeTo(InformationManager::Instance().getMyMainBaseLocation()->Location());
+			BWAPI::Position fleeTo(InformationManager::Instance().getMyMainBaseLocation()->getPosition());
 			Micro::AttackMove(carrier, fleeTo);
 			continue;
 		}

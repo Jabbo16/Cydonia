@@ -1,11 +1,7 @@
 #include "Common.h"
 #include "MapGrid.h"
-#include <BWAPI/Player.h>
-#include <BWAPI/Unit.h>
 
 using namespace UAlbertaBot;
-
-namespace { auto & bwemMap = BWEM::Map::Instance(); }
 
 MapGrid & MapGrid::Instance() 
 {
@@ -35,7 +31,7 @@ MapGrid::MapGrid(int mapWidth, int mapHeight, int cellSize)
 BWAPI::Position MapGrid::getLeastExplored(bool byGround) 
 {
 	// 1. Any starting location that has not been explored.
-	for (const auto tile : BWAPI::Broodwar->getStartLocations())
+	for (BWAPI::TilePosition tile : BWAPI::Broodwar->getStartLocations())
 	{
 		if (!BWAPI::Broodwar->isExplored(tile))
 		{
@@ -47,7 +43,7 @@ BWAPI::Position MapGrid::getLeastExplored(bool byGround)
 	int minSeen = 1000000;
 	double minSeenDist = 0;
 	int leastRow(0), leastCol(0);
-	const auto myArea = bwemMap.GetArea(BWAPI::Broodwar->self()->getStartLocation());
+
 	for (int r=0; r<rows; ++r)
 	{
 		for (int c=0; c<cols; ++c)
@@ -56,18 +52,12 @@ BWAPI::Position MapGrid::getLeastExplored(bool byGround)
 			BWAPI::Position cellCenter = getCellCenter(r,c);
 
 			// don't worry about places that aren't connected to our start location
-			// if (byGround &&
-			// 	bwemMap.GetPath(cellCenter, BWAPI::Position(BWAPI::Broodwar->self()->getStartLocation())).empty())
-			// {
-			// 	continue;
-			// }
-			if (byGround){
-				const BWEM::Area * cellArea = bwemMap.GetArea(BWAPI::TilePosition(cellCenter));
-				if (!cellArea || !cellArea->AccessibleFrom(myArea))
-				{
-					continue;
-				}
+			if (byGround &&
+				!BWTA::isConnected(BWAPI::TilePosition(cellCenter), BWAPI::Broodwar->self()->getStartLocation()))
+			{
+				continue;
 			}
+
 			BWAPI::Position home(BWAPI::Broodwar->self()->getStartLocation());
 			double dist = home.getDistance(getCellByIndex(r, c).center);
             int lastVisited = getCellByIndex(r, c).timeLastVisited;

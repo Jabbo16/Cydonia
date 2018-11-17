@@ -24,7 +24,7 @@ class BuildingPlacer
 	// BWEB-related stuff
 	LocutusWall		    _wall;
     int                 _hiddenTechBlock;
-    std::map<const BWEM::Base*, int> _baseProxyBlocks; // Best proxy block for each base
+    std::map<BWTA::BaseLocation*, int> _baseProxyBlocks; // Best proxy block for each base
     int                 _centerProxyBlock;      // Proxy block suitable for when we don't know the enemy base
     int                 _proxyBlock;            // Chosen proxy block
 

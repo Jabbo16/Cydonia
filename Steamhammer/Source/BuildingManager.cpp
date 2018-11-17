@@ -5,9 +5,6 @@
 #include "ScoutManager.h"
 #include "UnitUtil.h"
 #include "PathFinding.h"
-#include <BWAPI/Player.h>
-#include <BWAPI/Unit.h>
-#include <BWAPI/AIModule.h>
 
 namespace { auto & bwemMap = BWEM::Map::Instance(); }
 
@@ -217,7 +214,7 @@ void BuildingManager::constructAssignedBuildings()
                 // If we're trying to build a nexus against a terran opponent, assume there's a spider mine in the way
                 // We'll send a unit by to clear it
                 if (BWAPI::Broodwar->enemy()->getRace() == BWAPI::Races::Terran
-                    && b.type == BWAPI::Broodwar->self()->getRace().getResourceDepot())
+                    && b.type == BWAPI::UnitTypes::Protoss_Nexus)
                 {
                     auto base = InformationManager::Instance().baseAt(b.finalPosition);
                     if (base)
@@ -755,13 +752,13 @@ BWAPI::TilePosition BuildingManager::getBuildingLocation(const Building & b)
 	// gas steal
 	if (b.isWorkerScoutBuilding && b.type == BWAPI::UnitTypes::Protoss_Assimilator)
     {
-		const BWEM::Base * enemyBaseLocation = InformationManager::Instance().getEnemyMainBaseLocation();
+        BWTA::BaseLocation * enemyBaseLocation = InformationManager::Instance().getEnemyMainBaseLocation();
         UAB_ASSERT(enemyBaseLocation,"Should find enemy base before gas steal");
-        UAB_ASSERT(enemyBaseLocation->Geysers().size() > 0,"Should have spotted an enemy geyser");
+        UAB_ASSERT(enemyBaseLocation->getGeysers().size() > 0,"Should have spotted an enemy geyser");
 
-        for (auto& geyser : enemyBaseLocation->Geysers())
+        for (const auto geyser : enemyBaseLocation->getGeysers())
         {
-			return geyser->TopLeft();
+			return geyser->getTilePosition();
         }
     }
 
@@ -772,10 +769,10 @@ BWAPI::TilePosition BuildingManager::getBuildingLocation(const Building & b)
 
 	if (b.type.isResourceDepot())
 	{
-		const BWEM::Base * natural = InformationManager::Instance().getMyNaturalLocation();
+		BWTA::BaseLocation * natural = InformationManager::Instance().getMyNaturalLocation();
 		if (b.macroLocation == MacroLocation::Natural && natural)
 		{
-			return natural->Location();
+			return natural->getTilePosition();
 		}
 		if (b.macroLocation != MacroLocation::Macro)
 		{

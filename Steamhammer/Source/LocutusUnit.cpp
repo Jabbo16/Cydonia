@@ -4,18 +4,10 @@
 #include "Micro.h"
 #include "MapTools.h"
 #include "PathFinding.h"
-#include <BWAPI/UnitCommandType.h>
-#include <BWAPI/UnitCommand.h>
-#include <BWAPI/Unit.h>
-#include <BWAPI/Player.h>
-#include <BWAPI/TechType.h>
-#include <BWAPI/AIModule.h>
-#include "CombatCommander.h"
 
 const double pi = 3.14159265358979323846;
 
 const int DRAGOON_ATTACK_FRAMES = 6;
-const int VULTURE_ATTACK_FRAMES = 5;
 
 namespace { auto & bwemMap = BWEM::Map::Instance(); }
 namespace { auto & bwebMap = BWEB::Map::Instance(); }
@@ -27,7 +19,7 @@ void LocutusUnit::update()
 	if (!unit || !unit->exists()) { return; }
 
     if (unit->getType() == BWAPI::UnitTypes::Protoss_Dragoon) updateGoon();
-	if (unit->getType() == BWAPI::UnitTypes::Terran_Vulture) updateVulture();
+
     if (unit->getPosition() != lastPosition)
     {
         if (lastPosition.isValid())
@@ -352,7 +344,7 @@ void LocutusUnit::mineralWalk()
 void LocutusUnit::fleeFrom(BWAPI::Position position)
 {
     // TODO: Use a threat matrix, maybe it's actually best to move towards the position sometimes
-	if (unit->getType() == BWAPI::UnitTypes::Terran_Vulture && unit->getOrder() == BWAPI::Orders::PlaceMine) return;
+
     // Our current angle relative to the target
     BWAPI::Position delta(position - unit->getPosition());
     double angleToTarget = atan2(delta.y, delta.x);
@@ -449,13 +441,13 @@ int LocutusUnit::distanceToMoveTarget() const
 
 bool LocutusUnit::isReady() const
 {
-    if (unit->getType() != BWAPI::UnitTypes::Protoss_Dragoon && unit->getType() != BWAPI::UnitTypes::Terran_Vulture) return true;
+    if (unit->getType() != BWAPI::UnitTypes::Protoss_Dragoon) return true;
 
     // Compute delta between current frame and when the last attack started / will start
     int attackFrameDelta = BWAPI::Broodwar->getFrameCount() - lastAttackStartedAt;
 
     // Always give the dragoon some frames to perform their attack before getting another order
-    if (attackFrameDelta >= 0 && attackFrameDelta <= (unit->getType() == BWAPI::UnitTypes::Protoss_Dragoon ? DRAGOON_ATTACK_FRAMES : VULTURE_ATTACK_FRAMES)  - BWAPI::Broodwar->getRemainingLatencyFrames())
+    if (attackFrameDelta >= 0 && attackFrameDelta <= DRAGOON_ATTACK_FRAMES - BWAPI::Broodwar->getRemainingLatencyFrames())
     {
         return false;
     }
@@ -491,62 +483,6 @@ bool LocutusUnit::isStuck() const
 
     return potentiallyStuckSince > 0 &&
         potentiallyStuckSince < (BWAPI::Broodwar->getFrameCount() - BWAPI::Broodwar->getLatencyFrames() - 10);
-}
-
-void LocutusUnit::updateVulture()
-{
-	if (unit->getOrder() == BWAPI::Orders::PlaceMine) return;
-	if (BWAPI::Broodwar->self()->hasResearched(BWAPI::TechTypes::Spider_Mines)) // TODO fix
-	{
-		if (unit->getSpiderMineCount() > 0 && BWAPI::Broodwar->getClosestUnit(unit->getPosition(),
-			BWAPI::Filter::IsEnemy && !BWAPI::Filter::IsWorker, unit->getType().groundWeapon().maxRange() * 1.5))
-		{
-			Micro::LaySpiderMine(unit, unit->getPosition());
-			return;
-		}
-	}
-	// If we're not currently in an attack, determine the frame when the next attack will start
-	if (lastAttackStartedAt >= BWAPI::Broodwar->getFrameCount() ||
-		BWAPI::Broodwar->getFrameCount() - lastAttackStartedAt > VULTURE_ATTACK_FRAMES - BWAPI::Broodwar->getRemainingLatencyFrames())
-	{
-		lastAttackStartedAt = 0;
-
-		// If this is the start of the attack, set it to now
-		if (unit->isStartingAttack())
-			lastAttackStartedAt = BWAPI::Broodwar->getFrameCount();
-
-		// Otherwise predict when an attack command might result in the start of an attack
-		else if (unit->getLastCommand().getType() == BWAPI::UnitCommandTypes::Attack_Unit &&
-			unit->getLastCommand().getTarget() && unit->getLastCommand().getTarget()->exists() &&
-			unit->getLastCommand().getTarget()->isVisible() && unit->getLastCommand().getTarget()->getPosition().isValid())
-		{
-			lastAttackStartedAt = std::max(BWAPI::Broodwar->getFrameCount() + 1, std::max(
-				unit->getLastCommandFrame() + BWAPI::Broodwar->getLatencyFrames(),
-				BWAPI::Broodwar->getFrameCount() + unit->getGroundWeaponCooldown()));
-		}
-	}
-
-	// Determine if this unit is stuck
-
-	// If isMoving==false, the unit isn't stuck
-	if (!unit->isMoving())
-		potentiallyStuckSince = 0;
-
-	// If the unit's position has changed after potentially being stuck, it is no longer stuck
-	else if (potentiallyStuckSince > 0 && unit->getPosition() != lastPosition)
-		potentiallyStuckSince = 0;
-
-	// If we have issued a stop command to the unit on the last turn, it will no longer be stuck after the command is executed
-	else if (potentiallyStuckSince > 0 &&
-		unit->getLastCommand().getType() == BWAPI::UnitCommandTypes::Stop &&
-		BWAPI::Broodwar->getRemainingLatencyFrames() == BWAPI::Broodwar->getLatencyFrames())
-	{
-		potentiallyStuckSince = 0;
-	}
-
-	// Otherwise it might have been stuck since the last frame where isAttackFrame==true
-	else if (unit->isAttackFrame())
-		potentiallyStuckSince = BWAPI::Broodwar->getFrameCount();
 }
 
 void LocutusUnit::updateGoon()

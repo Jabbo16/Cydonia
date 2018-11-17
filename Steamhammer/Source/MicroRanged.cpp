@@ -2,12 +2,11 @@
 #include "CombatCommander.h"
 #include "UnitUtil.h"
 #include "BuildingPlacer.h"
-#include <BWAPI/Unit.h>
-#include <BWAPI/Player.h>
 
 const double pi = 3.14159265358979323846;
+
 using namespace UAlbertaBot;
-namespace { auto & bwemMap = BWEM::Map::Instance(); }
+
 // The unit's ranged ground weapon does splash damage, so it works under dark swarm.
 // Firebats are not here: They are melee units.
 // Tanks and lurkers are not here: They have their own micro managers.
@@ -119,7 +118,6 @@ void MicroRanged::assignTargets(const BWAPI::Unitset & targets)
 		BWAPI::Position closestTileOutside = center(availableTilesInside.begin()->first);
 		for (const auto & rangedUnit : rangedUnits)
 		{
-			if (rangedUnit->getType() == BWAPI::UnitTypes::Terran_Vulture && rangedUnit->getOrder() == BWAPI::Orders::PlaceMine) continue;
 			for (auto it = availableTilesInside.begin(); it != availableTilesInside.end(); )
 				if (it->first == rangedUnit->getTilePosition())
 				{
@@ -196,7 +194,7 @@ void MicroRanged::assignTargets(const BWAPI::Unitset & targets)
 			// If we started one, no further action this frame.
 			continue;
 		}
-		if(rangedUnit->getType() == BWAPI::UnitTypes::Terran_Vulture && rangedUnit->getOrder() == BWAPI::Orders::PlaceMine) continue;
+
 		if (rangedUnit->isBurrowed())
 		{
 			// For now, it would burrow only if irradiated. Leave it.
@@ -495,7 +493,7 @@ int MicroRanged::getAttackPriority(BWAPI::Unit rangedUnit, BWAPI::Unit target)
 	}
 
     // if the target is building something near our base something is fishy
-    BWAPI::Position ourBasePosition = BWAPI::Position(InformationManager::Instance().getMyMainBaseLocation()->Location());
+    BWAPI::Position ourBasePosition = BWAPI::Position(InformationManager::Instance().getMyMainBaseLocation()->getPosition());
 	if (target->getDistance(ourBasePosition) < 1000) {
 		if (target->getType().isWorker() && (target->isConstructing() || target->isRepairing()))
 		{
@@ -699,7 +697,6 @@ int MicroRanged::getAttackPriority(BWAPI::Unit rangedUnit, BWAPI::Unit target)
 
 void MicroRanged::kite(BWAPI::Unit rangedUnit, BWAPI::Unit target)
 {
-	if(rangedUnit->getType() == BWAPI::UnitTypes::Terran_Vulture && rangedUnit->getOrder() == BWAPI::Orders::PlaceMine) return;
     // If the unit is still in its attack animation, don't touch it
     if (!InformationManager::Instance().getLocutusUnit(rangedUnit).isReady())
         return;
@@ -718,12 +715,8 @@ void MicroRanged::kite(BWAPI::Unit rangedUnit, BWAPI::Unit target)
         BWAPI::Broodwar->self()->getUpgradeLevel(BWAPI::UpgradeTypes::Singularity_Charge))
     {
         range = 6 * 32;
-    } 
-	else if (rangedUnit->getType() == BWAPI::UnitTypes::Terran_Marine &&
-		BWAPI::Broodwar->self()->getUpgradeLevel(BWAPI::UpgradeTypes::U_238_Shells))
-	{
-		range = 5 * 32;
-	}
+    }
+
     int distToTarget = rangedUnit->getDistance(target);
 
     // If our weapon is ready to fire, attack
@@ -808,46 +801,42 @@ void MicroRanged::kite(BWAPI::Unit rangedUnit, BWAPI::Unit target)
     // Now check for blocking a choke
     if (!moveCloser)
     {
-		const BWEM::Area * area = bwemMap.GetArea(BWAPI::WalkPosition(rangedUnit->getPosition()));
-		if(area)
-		{
-			for (auto& choke : area->ChokePoints())
-			{
-				if (BWAPI::Position(choke->Geometry().front()).getDistance(BWAPI::Position(choke->Geometry().back())) < 64 &&
-					rangedUnit->getDistance(BWAPI::Position(choke->Center())) < 96)
-				{
-					// We're close to a choke, find out if there are friendly units behind us
+        for (BWTA::Chokepoint * choke : BWTA::getChokepoints())
+        {
+            if (choke->getWidth() < 64 &&
+                rangedUnit->getDistance(choke->getCenter()) < 96)
+            {
+                // We're close to a choke, find out if there are friendly units behind us
 
-					// Start by computing the angle of the choke
-					BWAPI::Position chokeDelta(BWAPI::Position(choke->Geometry().front() - choke->Geometry().back()));
-					double chokeAngle = atan2(chokeDelta.y, chokeDelta.x);
+                // Start by computing the angle of the choke
+                BWAPI::Position chokeDelta(choke->getSides().first - choke->getSides().second);
+                double chokeAngle = atan2(chokeDelta.y, chokeDelta.x);
 
-					// Now find points ahead and behind us with respect to the choke
-					// We'll find out which is which in a moment
-					BWAPI::Position first(
-						rangedUnit->getPosition().x - (int)std::round(48 * std::cos(chokeAngle + (pi / 2.0))),
-						rangedUnit->getPosition().y - (int)std::round(48 * std::sin(chokeAngle + (pi / 2.0))));
-					BWAPI::Position second(
-						rangedUnit->getPosition().x - (int)std::round(48 * std::cos(chokeAngle - (pi / 2.0))),
-						rangedUnit->getPosition().y - (int)std::round(48 * std::sin(chokeAngle - (pi / 2.0))));
+                // Now find points ahead and behind us with respect to the choke
+                // We'll find out which is which in a moment
+                BWAPI::Position first(
+                    rangedUnit->getPosition().x - (int)std::round(48 * std::cos(chokeAngle + (pi / 2.0))),
+                    rangedUnit->getPosition().y - (int)std::round(48 * std::sin(chokeAngle + (pi / 2.0))));
+                BWAPI::Position second(
+                    rangedUnit->getPosition().x - (int)std::round(48 * std::cos(chokeAngle - (pi / 2.0))),
+                    rangedUnit->getPosition().y - (int)std::round(48 * std::sin(chokeAngle - (pi / 2.0))));
 
-					// Find out which position is behind us
-					BWAPI::Position position = first;
-					if (target->getDistance(second) > target->getDistance(first))
-						position = second;
+                // Find out which position is behind us
+                BWAPI::Position position = first;
+                if (target->getDistance(second) > target->getDistance(first))
+                    position = second;
 
-					// Move closer if there is a friendly unit near the position
-					moveCloser =
-						InformationManager::Instance().getMyUnitGrid().get(position) > 0 ||
-						InformationManager::Instance().getMyUnitGrid().get(position + BWAPI::Position(-16, -16)) > 0 ||
-						InformationManager::Instance().getMyUnitGrid().get(position + BWAPI::Position(16, -16)) > 0 ||
-						InformationManager::Instance().getMyUnitGrid().get(position + BWAPI::Position(16, 16)) > 0 ||
-						InformationManager::Instance().getMyUnitGrid().get(position + BWAPI::Position(-16, 16)) > 0;
-					break;
-				}
-			}
-		}
-	}
+                // Move closer if there is a friendly unit near the position
+                moveCloser = 
+                    InformationManager::Instance().getMyUnitGrid().get(position) > 0 ||
+                    InformationManager::Instance().getMyUnitGrid().get(position + BWAPI::Position(-16, -16)) > 0 ||
+                    InformationManager::Instance().getMyUnitGrid().get(position + BWAPI::Position(16, -16)) > 0 ||
+                    InformationManager::Instance().getMyUnitGrid().get(position + BWAPI::Position(16, 16)) > 0 ||
+                    InformationManager::Instance().getMyUnitGrid().get(position + BWAPI::Position(-16, 16)) > 0;
+                break;
+            }
+        }
+    }
 
     // Execute move closer
     if (moveCloser)

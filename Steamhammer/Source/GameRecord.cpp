@@ -305,14 +305,14 @@ int GameRecord::snapDistance(const PlayerSnapshot & a, const PlayerSnapshot & b)
 // Figure out whether the enemy has seen our base yet.
 bool GameRecord::enemyScoutedUs() const
 {
-	const BWEM::Base * base = InformationManager::Instance().getMyMainBaseLocation();
+	BWTA::BaseLocation * base = InformationManager::Instance().getMyMainBaseLocation();
 
 	for (const auto & kv : InformationManager::Instance().getUnitData(BWAPI::Broodwar->enemy()).getUnits())
 	{
 		const UnitInfo & ui(kv.second);
 
 		// If a unit was last spotted close to us, assume we've been seen.
-		if (ui.lastPosition.getDistance(BWAPI::Position(base->Location())) < 800)
+		if (ui.lastPosition.getDistance(base->getPosition()) < 800)
 		{
 			return true;
 		}

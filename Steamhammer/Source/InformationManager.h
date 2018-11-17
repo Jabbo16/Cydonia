@@ -1,14 +1,12 @@
 #pragma once
 
 #include "Common.h"
+#include "BWTA.h"
 
 #include "Base.h"
 #include "UnitData.h"
 #include "LocutusUnit.h"
 #include "LocutusMapGrid.h"
-#include <BWAPI/Game.h>
-#include <BWAPI/Bulletset.h>
-#include <BWAPI/Unitset.h>
 
 namespace UAlbertaBot
 {
@@ -38,10 +36,10 @@ class InformationManager
     bool            _enemyHasInfantryRangeUpgrade;
 
 	std::map<BWAPI::Player, UnitData>                   _unitData;
-	std::map<BWAPI::Player, const BWEM::Base*>       _mainBaseLocations;
-	const BWEM::Base *								_myNaturalBaseLocation;  // whether taken yet or not; may be null
-	std::map<BWAPI::Player, std::set<const BWEM::Area *> >  _occupiedRegions;        // contains any building
-	std::map<const BWEM::Base *, Base *>				_theBases;
+	std::map<BWAPI::Player, BWTA::BaseLocation *>       _mainBaseLocations;
+	BWTA::BaseLocation *								_myNaturalBaseLocation;  // whether taken yet or not; may be null
+	std::map<BWAPI::Player, std::set<BWTA::Region *> >  _occupiedRegions;        // contains any building
+	std::map<BWTA::BaseLocation *, Base *>				_theBases;
 	BWAPI::Unitset										_staticDefense;
 	const BWEB::Station *								_enemyBaseStation;
 	BWAPI::Unitset										_ourPylons;
@@ -72,11 +70,11 @@ class InformationManager
 
 	int                     getIndex(BWAPI::Player player) const;
 
-	void					baseInferred(const BWEM::Base* base);
+	void					baseInferred(BWTA::BaseLocation * base);
 	void					baseFound(BWAPI::Unit depot);
-	void					baseFound(const BWEM::Base* base, BWAPI::Unit depot);
+	void					baseFound(BWTA::BaseLocation * base, BWAPI::Unit depot);
 	void					baseLost(BWAPI::TilePosition basePosition);
-	void					baseLost(const BWEM::Base* base);
+	void					baseLost(BWTA::BaseLocation * base);
 	void					maybeAddBase(BWAPI::Unit unit);
 	bool					closeEnough(BWAPI::TilePosition a, BWAPI::TilePosition b);
 	void					chooseNewMainBase();
@@ -88,7 +86,7 @@ class InformationManager
     void                    updateBaseLocationInfo();
 	void					enemyBaseLocationFromOverlordSighting();
 	void					updateTheBases();
-	void                    updateOccupiedRegions(const BWEM::Area * region, BWAPI::Player player);
+	void                    updateOccupiedRegions(BWTA::Region * region, BWAPI::Player player);
 	void					updateGoneFromLastPosition();
     void                    updateBullets();
 
@@ -111,7 +109,7 @@ public:
     void                    onEnemyBuildingLanded(BWAPI::Unit unit);
     void                    onEnemyBuildingFlying(BWAPI::UnitType type, BWAPI::Position lastPosition);
 
-	bool					isEnemyBuildingInRegion(const BWEM::Area* region, bool ignoreRefineries);
+	bool					isEnemyBuildingInRegion(BWTA::Region * region, bool ignoreRefineries);
 	bool					isEnemyBuildingNearby(BWAPI::Position position, int threshold);
     int						getNumUnits(BWAPI::UnitType type,BWAPI::Player player) const;
     bool					nearbyForceHasCloaked(BWAPI::Position p,BWAPI::Player player,int radius);
@@ -124,21 +122,21 @@ public:
 
     const UIMap &           getUnitInfo(BWAPI::Player player) const;
 
-	std::set<const BWEM::Area*> getOccupiedRegions(BWAPI::Player player);
+	std::set<BWTA::Region *> &  getOccupiedRegions(BWAPI::Player player);
 
-	const BWEM::Base* getMainBaseLocation(BWAPI::Player player);
-	const BWEM::Base* getMyMainBaseLocation();
-	const BWEM::Base* getEnemyMainBaseLocation();
+    BWTA::BaseLocation *    getMainBaseLocation(BWAPI::Player player);
+	BWTA::BaseLocation *	getMyMainBaseLocation();
+	BWTA::BaseLocation *	getEnemyMainBaseLocation();
 	const BWEB::Station *	getEnemyMainBaseStation();
-	BWAPI::Player			getBaseOwner(const BWEM::Base * base);
-	int         			getBaseOwnedSince(const BWEM::Base * base);
-	int         			getBaseLastScouted(const BWEM::Base * base);
-	BWAPI::Unit 			getBaseDepot(const BWEM::Base * base);
-	const BWEM::Base* getMyNaturalLocation();
-	std::vector<const BWEM::Base*> getBases(BWAPI::Player player);
-    std::vector<const BWEM::Base *> getMyBases() { return getBases(BWAPI::Broodwar->self()); }
-    std::vector<const BWEM::Base *> getEnemyBases() { return getBases(BWAPI::Broodwar->enemy()); }
-    Base*					getBase(const BWEM::Base* base) { return _theBases[base]; };
+	BWAPI::Player			getBaseOwner(BWTA::BaseLocation * base);
+	int         			getBaseOwnedSince(BWTA::BaseLocation * base);
+	int         			getBaseLastScouted(BWTA::BaseLocation * base);
+	BWAPI::Unit 			getBaseDepot(BWTA::BaseLocation * base);
+	BWTA::BaseLocation *	getMyNaturalLocation();
+    std::vector<BWTA::BaseLocation *> getBases(BWAPI::Player player);
+    std::vector<BWTA::BaseLocation *> getMyBases() { return getBases(BWAPI::Broodwar->self()); }
+    std::vector<BWTA::BaseLocation *> getEnemyBases() { return getBases(BWAPI::Broodwar->enemy()); }
+    Base*					getBase(BWTA::BaseLocation * base) { return _theBases[base]; };
     Base*					baseAt(BWAPI::TilePosition baseTilePosition);
     int						getTotalNumBases() const;
 	int						getNumBases(BWAPI::Player player);

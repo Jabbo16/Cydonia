@@ -7,10 +7,6 @@
 #include "Random.h"
 #include "UnitUtil.h"
 #include "PathFinding.h"
-#include <BWAPI/Player.h>
-#include <BWAPI/Unit.h>
-#include <BWAPI/Unitset.h>
-#include <BWAPI/Bullet.h>
 
 namespace { auto & bwemMap = BWEM::Map::Instance(); }
 namespace { auto & bwebMap = BWEB::Map::Instance(); }
@@ -54,58 +50,28 @@ InformationManager::InformationManager()
 // This fills in _theBases with neutral bases. An event will place our resourceDepot.
 void InformationManager::initializeTheBases()
 {
-	for(auto& area : bwemMap.Areas())
+	for (BWTA::BaseLocation * base : BWTA::getBaseLocations())
 	{
-		for (const auto& base : area.Bases())
+		Base * knownBase = Bases::Instance().getBaseAtTilePosition(base->getTilePosition());
+		if (knownBase)
 		{
-			Base * knownBase = Bases::Instance().getBaseAtTilePosition(base.Location());
-			if (knownBase)
-			{
-				_theBases[&base] = knownBase;
-			}
-			else
-			{
-				_theBases[&base] = new Base(base.Location());
-			}
+			_theBases[base] = knownBase;
+		}
+		else
+		{
+			_theBases[base] = new Base(base->getTilePosition());
 		}
 	}
-	
 }
 
 // Set up _mainBaseLocations and _occupiedLocations.
 void InformationManager::initializeRegionInformation()
 {
-	for(const auto& area : bwemMap.Areas())
-	{
-		for(const auto& base : area.Bases())
-		{
-			if(!base.Starting()) continue;
-			if(base.Location() == BWAPI::Broodwar->self()->getStartLocation())
-			{
-				
-				_mainBaseLocations[_self] = &base;
-				if(BWAPI::Broodwar->getStartLocations().size() > 2)
-				{
-					_mainBaseLocations[_enemy] = nullptr;
-					goto end;
-				}
-				for (const auto& area2 : bwemMap.Areas())
-				{
-					for (const auto& base2 : area2.Bases()) {
-						if(!base.Starting() || &base == &base2) continue;
-						_mainBaseLocations[_enemy] = &base2;
-						goto end;
-					}
-				}
-			}
-		}
-	}
-	end:
-	//_mainBaseLocations[_self] = BWTA::getStartLocation(_self);
-	//_mainBaseLocations[_enemy] = BWTA::getStartLocation(_enemy);
+	_mainBaseLocations[_self] = BWTA::getStartLocation(_self);
+	_mainBaseLocations[_enemy] = BWTA::getStartLocation(_enemy);
 
 	// push that region into our occupied vector
-	updateOccupiedRegions(_mainBaseLocations[_self]->GetArea(), _self);
+	updateOccupiedRegions(BWTA::getRegion(_mainBaseLocations[_self]->getTilePosition()), _self);
 }
 
 // Figure out what base is our "natural expansion". In rare cases, there might be none.
@@ -113,46 +79,43 @@ void InformationManager::initializeRegionInformation()
 void InformationManager::initializeNaturalBase()
 {
 	// We'll go through the bases and pick the best one as the natural.
-	const BWEM::Base * bestBase = nullptr;
+	BWTA::BaseLocation * bestBase = nullptr;
 	double bestScore = 0.0;
 
 	BWAPI::TilePosition homeTile = _self->getStartLocation();
 	BWAPI::Position myBasePosition(homeTile);
 
-	for(auto& area : bwemMap.Areas())
+	for (BWTA::BaseLocation * base : BWTA::getBaseLocations())
 	{
-		for (const auto& base : area.Bases())
+		double score = 0.0;
+
+		BWAPI::TilePosition tile = base->getTilePosition();
+
+		// The main is not the natural.
+		if (tile == homeTile)
 		{
-			double score = 0.0;
+			continue;
+		}
 
-			BWAPI::TilePosition tile = base.Location();
+		// Ww want to be close to our own base.
+		double distanceFromUs = MapTools::Instance().getGroundTileDistance(BWAPI::Position(tile), myBasePosition);
 
-			// The main is not the natural.
-			if (tile == homeTile)
-			{
-				continue;
-			}
+		// If it is not connected, skip it. Islands do this.
+		if (!BWTA::isConnected(homeTile, tile) || distanceFromUs < 0)
+		{
+			continue;
+		}
 
-			// Ww want to be close to our own base.
-			double distanceFromUs = MapTools::Instance().getGroundTileDistance(BWAPI::Position(tile), myBasePosition);
+		// Add up the score.
+		score = -distanceFromUs;
 
-			// If it is not connected, skip it. Islands do this.
-			if (bwemMap.GetPath(BWAPI::Position(homeTile), BWAPI::Position(tile)).empty() || distanceFromUs < 0)
-			{
-				continue;
-			}
+		// More resources -> better.
+		score += 0.01 * base->minerals() + 0.02 * base->gas();
 
-			// Add up the score.
-			score = -distanceFromUs;
-
-			// More resources -> better.
-			score += 0.01 * base.Minerals().size() + 0.02 * base.Geysers().size();
-
-			if (!bestBase || score > bestScore)
-			{
-				bestBase = &base;
-				bestScore = score;
-			}
+		if (!bestBase || score > bestScore)
+		{
+			bestBase = base;
+			bestScore = score;
 		}
 	}
 
@@ -163,7 +126,7 @@ void InformationManager::initializeNaturalBase()
 // A base is inferred to exist at the given position, without having been seen.
 // Only enemy bases can be inferred; we see our own.
 // Adjust its value to match. It is not reserved.
-void InformationManager::baseInferred(const BWEM::Base * base)
+void InformationManager::baseInferred(BWTA::BaseLocation * base)
 {
 	if (_theBases[base]->owner != _self)
 	{
@@ -178,23 +141,19 @@ void InformationManager::baseFound(BWAPI::Unit depot)
 {
 	UAB_ASSERT(depot && depot->getType().isResourceDepot(), "bad args");
 
-	for(auto& area : bwemMap.Areas())
+	for (BWTA::BaseLocation * base : BWTA::getBaseLocations())
 	{
-		for (const auto& base : area.Bases())
+		if (closeEnough(base->getTilePosition(), depot->getTilePosition()))
 		{
-			if (closeEnough(base.Location(), depot->getTilePosition()))
-			{
-				baseFound(&base, depot);
-				return;
-			}
+			baseFound(base, depot);
+			return;
 		}
 	}
-	
 }
 
 // Set a base where the base and depot are both known.
 // The depot must be at or near the base location; this is not checked.
-void InformationManager::baseFound(const BWEM::Base * base, BWAPI::Unit depot)
+void InformationManager::baseFound(BWTA::BaseLocation * base, BWAPI::Unit depot)
 {
 	UAB_ASSERT(base && depot && depot->getType().isResourceDepot(), "bad args");
 
@@ -206,23 +165,19 @@ void InformationManager::baseFound(const BWEM::Base * base, BWAPI::Unit depot)
 // If the lost base was our main, choose a new one if possible.
 void InformationManager::baseLost(BWAPI::TilePosition basePosition)
 {
-	for(auto& area : bwemMap.Areas())
+	for (BWTA::BaseLocation * base : BWTA::getBaseLocations())
 	{
-		for (const auto& base : area.Bases())
+		if (closeEnough(base->getTilePosition(), basePosition))
 		{
-			if (closeEnough(base.Location(), basePosition))
-			{
-				baseLost(&base);
-				return;
-			}
+			baseLost(base);
+			return;
 		}
 	}
-	
 }
 
 // A base was lost and is now unowned.
 // If the lost base was our main, choose a new one if possible.
-void InformationManager::baseLost(const BWEM::Base * base) //TODO check if value changes
+void InformationManager::baseLost(BWTA::BaseLocation * base)
 {
 	UAB_ASSERT(base, "bad args");
 
@@ -237,28 +192,25 @@ void InformationManager::baseLost(const BWEM::Base * base) //TODO check if value
 // Otherwise we'll keep trying to build in the old one, where the enemy may still be.
 void InformationManager::chooseNewMainBase()
 {
-	const BWEM::Base * oldMain = getMyMainBaseLocation();
+	BWTA::BaseLocation * oldMain = getMyMainBaseLocation();
 
 	// Choose a base we own which is as far away from the old main as possible.
 	// Maybe that will be safer.
 	double newMainDist = 0.0;
-	const BWEM::Base * newMain = nullptr;
-	for (auto& area : bwemMap.Areas())
+	BWTA::BaseLocation * newMain = nullptr;
+
+	for (BWTA::BaseLocation * base : BWTA::getBaseLocations())
 	{
-		for (const auto& base : area.Bases())
+		if (_theBases[base]->owner == _self)
 		{
-			if (_theBases[&base]->owner == _self)
+			double dist = base->getAirDistance(oldMain);
+			if (dist > newMainDist)
 			{
-				double dist = BWAPI::Position(base.Location()).getDistance(BWAPI::Position(oldMain->Location()));
-				if (dist > newMainDist)
-				{
-					newMainDist = dist;
-					newMain = &base;
-				}
+				newMainDist = dist;
+				newMain = base;
 			}
 		}
 	}
-	
 
 	// If we didn't find a new main base, we're in deep trouble. We may as well keep the old one.
 	// By decree, we always have a main base, even if it is unoccupied. It simplifies the rest.
@@ -275,26 +227,22 @@ void InformationManager::maybeChooseNewMainBase()
 	if (ProductionManager::Instance().isOutOfBook() && Random::Instance().index(2) == 0)
 	{
 		// 2. List my bases.
-		std::vector<const BWEM::Base *> myBases;
-		for(auto& area : bwemMap.Areas())
+		std::vector<BWTA::BaseLocation *> myBases;
+		for (BWTA::BaseLocation * base : BWTA::getBaseLocations())
 		{
-			for (const auto& base : area.Bases())
+			if (_theBases[base]->owner == _self &&
+				_theBases[base]->resourceDepot &&
+				_theBases[base]->resourceDepot->isCompleted())
 			{
-				if (_theBases[&base]->owner == _self &&
-					_theBases[&base]->resourceDepot &&
-					_theBases[&base]->resourceDepot->isCompleted())
-				{
-					myBases.push_back(&base);
-				}
-			}
-
-			// 3. Choose one, if there is a choice.
-			if (myBases.size() > 1)
-			{
-				_mainBaseLocations[_self] = myBases.at(Random::Instance().index(myBases.size()));
+				 myBases.push_back(base);
 			}
 		}
-		
+
+		// 3. Choose one, if there is a choice.
+		if (myBases.size() > 1)
+		{
+			_mainBaseLocations[_self] = myBases.at(Random::Instance().index(myBases.size()));
+		}
 	}
 }
 
@@ -386,7 +334,7 @@ void InformationManager::update()
             debug << ". isMoving=" << unit->isMoving();
         }
 
-        else if (unit->getType() == BWAPI::Broodwar->self()->getRace().getWorker() && false)
+        else if (unit->getType() == BWAPI::UnitTypes::Protoss_Probe && false)
         {
             anyDebugUnits = true;
 
@@ -470,54 +418,50 @@ void InformationManager::updateBaseLocationInfo()
 		bool baseFound = false;
 
 		// an unexplored base location holder
-		const BWEM::Base * unexplored = nullptr;
+		BWTA::BaseLocation * unexplored = nullptr;
 
-		for(auto& area : bwemMap.Areas()){
-			for (const auto& startLocation : area.Bases())
+		for (BWTA::BaseLocation * startLocation : BWTA::getStartLocations()) 
+		{
+			if (isEnemyBuildingInRegion(BWTA::getRegion(startLocation->getTilePosition()), true) ||
+                isEnemyBuildingNearby(startLocation->getPosition(), 1500))
 			{
-				if(!startLocation.Starting()) continue;
-				if (isEnemyBuildingInRegion(startLocation.GetArea(), true) ||
-					isEnemyBuildingNearby(BWAPI::Position(startLocation.Location()), 1500))
+				updateOccupiedRegions(BWTA::getRegion(startLocation->getTilePosition()), _enemy);
+
+				// On a competition map, our base and the enemy base will never be in the same region.
+				// If we find an enemy building in our region, it's a proxy.
+				if (startLocation == getMyMainBaseLocation())
 				{
-					updateOccupiedRegions(startLocation.GetArea(), _enemy);
-
-					// On a competition map, our base and the enemy base will never be in the same region.
-					// If we find an enemy building in our region, it's a proxy.
-					if (&startLocation == getMyMainBaseLocation())
-					{
-						_enemyProxy = true;
-					}
-					else
-					{
-						if (Config::Debug::DrawScoutInfo)
-						{
-							BWAPI::Broodwar->printf("Enemy base seen");
-						}
-
-						baseFound = true;
-						_mainBaseLocations[_enemy] = &startLocation;
-						baseInferred(&startLocation);
-					}
-				}
-
-				// TODO If the enemy is zerg, we can be a little quicker by looking for creep.
-				// TODO If we see a mineral patch that has been mined, that should be a base.
-				if (BWAPI::Broodwar->isExplored(startLocation.Location()))
-				{
-					// Count the explored bases.
-					++exploredStartLocations;
+					_enemyProxy = true;
 				}
 				else
 				{
-					// Remember the unexplored base. It may be the only one.
-					unexplored = &startLocation;
+					if (Config::Debug::DrawScoutInfo)
+					{
+						BWAPI::Broodwar->printf("Enemy base seen");
+					}
+
+					baseFound = true;
+					_mainBaseLocations[_enemy] = startLocation;
+					baseInferred(startLocation);
 				}
 			}
+
+			// TODO If the enemy is zerg, we can be a little quicker by looking for creep.
+			// TODO If we see a mineral patch that has been mined, that should be a base.
+			if (BWAPI::Broodwar->isExplored(startLocation->getTilePosition())) 
+			{
+				// Count the explored bases.
+				++exploredStartLocations;
+			} 
+			else 
+			{
+				// Remember the unexplored base. It may be the only one.
+				unexplored = startLocation;
+			}
 		}
-		
 
 		// if we've explored every start location except one, it's the enemy
-		if (!baseFound && exploredStartLocations + 1 == bwemMap.StartingLocations().size())
+		if (!baseFound && exploredStartLocations + 1 == BWTA::getStartLocations().size())
 		{
             if (Config::Debug::DrawScoutInfo)
             {
@@ -526,13 +470,13 @@ void InformationManager::updateBaseLocationInfo()
 			
 			_mainBaseLocations[_enemy] = unexplored;
 			baseInferred(unexplored);
-			updateOccupiedRegions(unexplored->GetArea(), _enemy);
+			updateOccupiedRegions(BWTA::getRegion(unexplored->getTilePosition()), _enemy);
 		}
 	// otherwise we do know it, so push it back
 	}
 	else 
 	{
-		updateOccupiedRegions(_mainBaseLocations[_enemy]->GetArea(), _enemy);
+		updateOccupiedRegions(BWTA::getRegion(_mainBaseLocations[_enemy]->getTilePosition()), _enemy);
 	}
 
 	// The enemy occupies a region if it has a building there.
@@ -542,7 +486,7 @@ void InformationManager::updateBaseLocationInfo()
 
 		if (ui.type.isBuilding() && !ui.goneFromLastPosition)
 		{
-			updateOccupiedRegions(bwemMap.GetArea(BWAPI::TilePosition(ui.lastPosition)), _enemy);
+			updateOccupiedRegions(BWTA::getRegion(BWAPI::TilePosition(ui.lastPosition)), _enemy);
 		}
 	}
 
@@ -550,11 +494,11 @@ void InformationManager::updateBaseLocationInfo()
     // Special case: if we have a wall at our natural, it will often have buildings in both the
     // natural region and a region outside our base. They are all logically part of the natural though,
     // so we fudge the region assignment to fit.
-	const BWEM::Base * naturalLocation = InformationManager::Instance().getMyNaturalLocation();
-	const BWEM::Area * naturalRegion = nullptr;
+    BWTA::BaseLocation * naturalLocation = InformationManager::Instance().getMyNaturalLocation();
+    BWTA::Region * naturalRegion = nullptr;
     if (naturalLocation)
     {
-		naturalRegion = naturalLocation->GetArea();
+        naturalRegion = BWTA::getRegion(naturalLocation->getPosition());
     }
 	for (const auto & kv : _unitData[_self].getUnits())
 	{
@@ -562,7 +506,7 @@ void InformationManager::updateBaseLocationInfo()
 
 		if (ui.type.isBuilding() && !ui.goneFromLastPosition)
 		{
-            auto region = bwemMap.GetArea(BWAPI::TilePosition(ui.lastPosition));
+            auto region = BWTA::getRegion(BWAPI::TilePosition(ui.lastPosition));
 
             if (naturalRegion && BuildingPlacer::Instance().getWall().containsBuildingAt(ui.unit->getTilePosition()))
                 region = naturalRegion;
@@ -600,41 +544,37 @@ void InformationManager::enemyBaseLocationFromOverlordSighting()
 		}
 
 		// What bases could the overlord be from? Can we narrow it down to 1 possibility?
-		const BWEM::Base * possibleEnemyBase = nullptr;
+		BWTA::BaseLocation * possibleEnemyBase = nullptr;
 		int countPossibleBases = 0;
-		for(auto& area : bwemMap.Areas())
+		for (BWTA::BaseLocation * base : BWTA::getStartLocations())
 		{
-			for (const auto& base : area.Bases())
+			if (BWAPI::Broodwar->isExplored(base->getTilePosition()))
 			{
-				if (BWAPI::Broodwar->isExplored(base.Location()))
-				{
-					// We've already seen this base, and the enemy is not there.
-					continue;
-				}
+				// We've already seen this base, and the enemy is not there.
+				continue;
+			}
 
-				// Assume the overlord came from this base.
-				// Where did the overlord start from? It starts offset from the hatchery in a specific way.
-				BWAPI::Position overlordStartPos;
-				overlordStartPos.x = BWAPI::Position(base.Location()).x + ((BWAPI::Position(base.Location()).x < 32 * BWAPI::Broodwar->mapWidth() / 2) ? +99 : -99);
-				overlordStartPos.y = BWAPI::Position(base.Location()).y + ((BWAPI::Position(base.Location()).y < 32 * BWAPI::Broodwar->mapHeight() / 2) ? +65 : -65);
+			// Assume the overlord came from this base.
+			// Where did the overlord start from? It starts offset from the hatchery in a specific way.
+			BWAPI::Position overlordStartPos;
+			overlordStartPos.x = base->getPosition().x + ((base->getPosition().x < 32 * BWAPI::Broodwar->mapWidth() / 2) ? +99 : -99);
+			overlordStartPos.y = base->getPosition().y + ((base->getPosition().y < 32 * BWAPI::Broodwar->mapHeight() / 2) ? +65 : -65);
 
-				// How far could it have traveled from there?
-				double maxDistance = double(now) * (BWAPI::UnitTypes::Zerg_Overlord).topSpeed();
-				if (maxDistance >= double(unit->getDistance(overlordStartPos)))
-				{
-					// It could have started from this base.
-					possibleEnemyBase = &base;
-					++countPossibleBases;
-				}
+			// How far could it have traveled from there?
+			double maxDistance = double(now) * (BWAPI::UnitTypes::Zerg_Overlord).topSpeed();
+			if (maxDistance >= double(unit->getDistance(overlordStartPos)))
+			{
+				// It could have started from this base.
+				possibleEnemyBase = base;
+				++countPossibleBases;
 			}
 		}
-		
 		if (countPossibleBases == 1)
 		{
 			// Success.
 			_mainBaseLocations[_enemy] = possibleEnemyBase;
 			baseInferred(possibleEnemyBase);
-			updateOccupiedRegions(possibleEnemyBase->GetArea(), _enemy);
+			updateOccupiedRegions(BWTA::getRegion(possibleEnemyBase->getTilePosition()), _enemy);
 			return;
 		}
 	}
@@ -644,68 +584,64 @@ void InformationManager::enemyBaseLocationFromOverlordSighting()
 // Look for conflicting information and make corrections.
 void InformationManager::updateTheBases()
 {
-	for(auto& area : bwemMap.Areas())
+	for (BWTA::BaseLocation * base : BWTA::getBaseLocations())
 	{
-		for (const auto& base : area.Bases())
+		// If we can see the tile where the resource depot would be.
+		if (BWAPI::Broodwar->isVisible(base->getTilePosition()))
 		{
-			// If we can see the tile where the resource depot would be.
-			if (BWAPI::Broodwar->isVisible(base.Location()))
+            _theBases[base]->lastScouted = BWAPI::Broodwar->getFrameCount();
+
+            // Check if there is a base here
+			BWAPI::Unitset units = BWAPI::Broodwar->getUnitsOnTile(base->getTilePosition());
+			BWAPI::Unit depot = nullptr;
+			for (const auto unit : units)
 			{
-				_theBases[&base]->lastScouted = BWAPI::Broodwar->getFrameCount();
-
-				// Check if there is a base here
-				BWAPI::Unitset units = BWAPI::Broodwar->getUnitsOnTile(base.Location());
-				BWAPI::Unit depot = nullptr;
-				for (const auto unit : units)
+				if (unit->getType().isResourceDepot())
 				{
-					if (unit->getType().isResourceDepot())
-					{
-						depot = unit;
-						break;
-					}
+					depot = unit;
+					break;
 				}
-				if (depot)
-				{
-					// The base is occupied.
-					baseFound(&base, depot);
-				}
-				else
-				{
-					// The base is empty.
-					baseLost(&base);
-				}
-
-				// If we have marked the base as being spider mined, clear it if we have a combat unit nearby
-				// that would have activated the mine
-				if (_theBases[&base]->spiderMined)
-				{
-					BWAPI::Unitset ourUnits;
-					MapGrid::Instance().getUnits(ourUnits, BWAPI::Position(base.Location()), BWAPI::UnitTypes::Terran_Vulture_Spider_Mine.sightRange() - 32, true, false);
-					for (const auto unit : ourUnits)
-					{
-						if (!unit->isFlying() && UnitUtil::IsCombatUnit(unit))
-						{
-							_theBases[&base]->spiderMined = false;
-							Log().Debug() << "Defused spider-mined base @ " << base.Location();
-							break;
-						}
-					}
-				}
+			}
+			if (depot)
+			{
+				// The base is occupied.
+				baseFound(base, depot);
 			}
 			else
 			{
-				// We don't see anything. It's definitely not our base.
-				if (_theBases[&base]->owner == _self)
-				{
-					baseLost(base.Location());
-				}
+				// The base is empty.
+				baseLost(base);
+			}
+
+            // If we have marked the base as being spider mined, clear it if we have a combat unit nearby
+            // that would have activated the mine
+            if (_theBases[base]->spiderMined)
+            {
+                BWAPI::Unitset ourUnits;
+                MapGrid::Instance().getUnits(ourUnits, base->getPosition(), BWAPI::UnitTypes::Terran_Vulture_Spider_Mine.sightRange() - 32, true, false);
+                for (const auto unit : ourUnits)
+                {
+                    if (!unit->isFlying() && UnitUtil::IsCombatUnit(unit))
+                    {
+                        _theBases[base]->spiderMined = false;
+                        Log().Debug() << "Defused spider-mined base @ " << base->getTilePosition();
+                        break;
+                    }
+                }
+            }
+		}
+		else
+		{
+			// We don't see anything. It's definitely not our base.
+			if (_theBases[base]->owner == _self)
+			{
+				baseLost(base->getTilePosition());
 			}
 		}
 	}
-	
 }
 
-void InformationManager::updateOccupiedRegions(const BWEM::Area* region, BWAPI::Player player) 
+void InformationManager::updateOccupiedRegions(BWTA::Region * region, BWAPI::Player player) 
 {
 	// if the region is valid (flying buildings may be in nullptr regions)
 	if (region)
@@ -890,8 +826,8 @@ void InformationManager::detectEnemyWall(BWAPI::Unit unit)
             if (enemyWalls.find(choke) != enemyWalls.end()) continue;
 
             // Determine which area is on our side of the wall
-            int firstDist = PathFinding::GetGroundDistance(BWAPI::Position(choke->GetAreas().first->Top()), BWAPI::Position(getMyMainBaseLocation()->Location()), PathFinding::PathFindingOptions::UseNearestBWEMArea);
-            int secondDist = PathFinding::GetGroundDistance(BWAPI::Position(choke->GetAreas().second->Top()), BWAPI::Position(getMyMainBaseLocation()->Location()), PathFinding::PathFindingOptions::UseNearestBWEMArea);
+            int firstDist = PathFinding::GetGroundDistance(BWAPI::Position(choke->GetAreas().first->Top()), getMyMainBaseLocation()->getPosition(), PathFinding::PathFindingOptions::UseNearestBWEMArea);
+            int secondDist = PathFinding::GetGroundDistance(BWAPI::Position(choke->GetAreas().second->Top()), getMyMainBaseLocation()->getPosition(), PathFinding::PathFindingOptions::UseNearestBWEMArea);
             auto closestArea = (firstDist < secondDist) ? choke->GetAreas().first : choke->GetAreas().second;
             auto furthestArea = (firstDist < secondDist) ? choke->GetAreas().second : choke->GetAreas().first;
 
@@ -1030,7 +966,7 @@ bool InformationManager::isBehindEnemyWall(BWAPI::TilePosition tile)
     return false;
 }
 
-bool InformationManager::isEnemyBuildingInRegion(const BWEM::Area * region, bool ignoreRefineries) 
+bool InformationManager::isEnemyBuildingInRegion(BWTA::Region * region, bool ignoreRefineries) 
 {
 	// invalid regions aren't considered the same, but they will both be null
 	if (!region)
@@ -1046,7 +982,7 @@ bool InformationManager::isEnemyBuildingInRegion(const BWEM::Area * region, bool
 
 		if (ui.type.isBuilding() && !ui.goneFromLastPosition)
 		{
-			if (bwemMap.GetArea(BWAPI::TilePosition(ui.lastPosition)) == region) 
+			if (BWTA::getRegion(BWAPI::TilePosition(ui.lastPosition)) == region) 
 			{
 				return true;
 			}
@@ -1079,25 +1015,25 @@ const UIMap & InformationManager::getUnitInfo(BWAPI::Player player) const
 	return getUnitData(player).getUnits();
 }
 
-std::set<const BWEM::Area*> InformationManager::getOccupiedRegions(BWAPI::Player player)
+std::set<BWTA::Region *> & InformationManager::getOccupiedRegions(BWAPI::Player player)
 {
 	return _occupiedRegions[player];
 }
 
-const BWEM::Base* InformationManager::getMainBaseLocation(BWAPI::Player player)
+BWTA::BaseLocation * InformationManager::getMainBaseLocation(BWAPI::Player player)
 {
 	return _mainBaseLocations[player];
 }
 
 // Guaranteed non-null. If we have no bases left, it is our start location.
-const BWEM::Base* InformationManager::getMyMainBaseLocation()
+BWTA::BaseLocation * InformationManager::getMyMainBaseLocation()
 {
 	UAB_ASSERT(_mainBaseLocations[_self], "no base location");
 	return _mainBaseLocations[_self];
 }
 
 // Null until the enemy base is located.
-const BWEM::Base* InformationManager::getEnemyMainBaseLocation()
+BWTA::BaseLocation * InformationManager::getEnemyMainBaseLocation()
 {
 	return _mainBaseLocations[_enemy];
 }
@@ -1107,13 +1043,13 @@ const BWEB::Station * InformationManager::getEnemyMainBaseStation()
 {
 	if (_enemyBaseStation) return _enemyBaseStation;
 
-	const BWEM::Base * enemyBaseLocation = getEnemyMainBaseLocation();
+	BWTA::BaseLocation * enemyBaseLocation = getEnemyMainBaseLocation();
 	if (!enemyBaseLocation) return nullptr;
 
 	double best = DBL_MAX;
 	for (const auto& station : BWEB::Map::Instance().Stations())
 	{
-		double dist = BWAPI::Position(enemyBaseLocation->Location()).getDistance(station.BWEMBase()->Center());
+		double dist = enemyBaseLocation->getPosition().getDistance(station.BWEMBase()->Center());
 		if (dist < best)
 		{
 			best = dist;
@@ -1125,19 +1061,19 @@ const BWEB::Station * InformationManager::getEnemyMainBaseStation()
 }
 
 // Self, enemy, or neutral.
-BWAPI::Player InformationManager::getBaseOwner(const BWEM::Base * base)
+BWAPI::Player InformationManager::getBaseOwner(BWTA::BaseLocation * base)
 {
 	return _theBases[base]->owner;
 }
 
 // Frame the base last changed ownership
-int InformationManager::getBaseOwnedSince(const BWEM::Base * base)
+int InformationManager::getBaseOwnedSince(BWTA::BaseLocation * base)
 {
     return _theBases[base]->ownedSince;
 }
 
 // Frame the base was last scouted
-int InformationManager::getBaseLastScouted(const BWEM::Base * base)
+int InformationManager::getBaseLastScouted(BWTA::BaseLocation * base)
 {
     return _theBases[base]->lastScouted;
 }
@@ -1145,33 +1081,29 @@ int InformationManager::getBaseLastScouted(const BWEM::Base * base)
 // If it's the enemy base, the depot will be null if it has not been seen.
 // If this is our base, there is still a chance that the depot may be null.
 // And if not null, the depot may be incomplete.
-BWAPI::Unit InformationManager::getBaseDepot(const BWEM::Base * base)
+BWAPI::Unit InformationManager::getBaseDepot(BWTA::BaseLocation * base)
 {
 	return _theBases[base]->resourceDepot;
 }
 
 // The natural base, whether it is taken or not.
 // May be null on some maps.
-const BWEM::Base* InformationManager::getMyNaturalLocation()
+BWTA::BaseLocation * InformationManager::getMyNaturalLocation()
 {
 	return _myNaturalBaseLocation;
 }
 
 // All bases owned by me.
-std::vector<const BWEM::Base*> InformationManager::getBases(BWAPI::Player player)
+std::vector<BWTA::BaseLocation *> InformationManager::getBases(BWAPI::Player player)
 {
-    std::vector<const BWEM::Base *> result;
-	for(auto& area : bwemMap.Areas())
-	{
-		for (const auto& base : area.Bases())
-		{
-			if (_theBases[&base]->owner == player)
-			{
-				result.push_back(&base);
-			}
-		}
-	}
-    
+    std::vector<BWTA::BaseLocation *> result;
+    for (BWTA::BaseLocation * base : BWTA::getBaseLocations())
+    {
+        if (_theBases[base]->owner == player)
+        {
+            result.push_back(base);
+        }
+    }
 
     return result;
 }
@@ -1181,17 +1113,14 @@ std::vector<const BWEM::Base*> InformationManager::getBases(BWAPI::Player player
 int InformationManager::getNumBases(BWAPI::Player player)
 {
 	int count = 0;
-	for (auto& area : bwemMap.Areas())
+
+	for (BWTA::BaseLocation * base : BWTA::getBaseLocations())
 	{
-		for (const auto& base : area.Bases())
+		if (_theBases[base]->owner == player)
 		{
-			if (_theBases[&base]->owner == player)
-			{
-				++count;
-			}
+			++count;
 		}
 	}
-	
 
 	return count;
 }
@@ -1200,17 +1129,14 @@ int InformationManager::getNumBases(BWAPI::Player player)
 int InformationManager::getNumFreeLandBases()
 {
 	int count = 0;
-	for (auto& area : bwemMap.Areas())
+
+	for (BWTA::BaseLocation * base : BWTA::getBaseLocations())
 	{
-		for (const auto& base : area.Bases())
+		if (_theBases[base]->owner == BWAPI::Broodwar->neutral() && !base->isIsland())
 		{
-			if (_theBases[&base]->owner == BWAPI::Broodwar->neutral() && !base.GetArea()->AccessibleNeighbours().empty())
-			{
-				++count;
-			}
+			++count;
 		}
 	}
-	
 
 	return count;
 }
@@ -1220,17 +1146,14 @@ int InformationManager::getNumFreeLandBases()
 int InformationManager::getMyNumMineralPatches()
 {
 	int count = 0;
-	for (auto& area : bwemMap.Areas())
+
+	for (BWTA::BaseLocation * base : BWTA::getBaseLocations())
 	{
-		for (const auto& base : area.Bases())
+		if (_theBases[base]->owner == _self)
 		{
-			if (_theBases[&base]->owner == _self)
-			{
-				count += base.Minerals().size();
-			}
+			count += base->getMinerals().size();
 		}
 	}
-	
 
 	return count;
 }
@@ -1240,21 +1163,18 @@ int InformationManager::getMyNumMineralPatches()
 int InformationManager::getMyNumGeysers()
 {
 	int count = 0;
-	for (auto& area : bwemMap.Areas())
-	{
-		for (const auto& base : area.Bases())
-		{
-			BWAPI::Unit depot = _theBases[&base]->resourceDepot;
 
-			if (_theBases[&base]->owner == _self &&
-				depot &&                // should never be null, but we check anyway
-				(depot->isCompleted() || UnitUtil::IsMorphedBuildingType(depot->getType())))
-			{
-				count += base.Geysers().size();
-			}
+	for (BWTA::BaseLocation * base : BWTA::getBaseLocations())
+	{
+		BWAPI::Unit depot = _theBases[base]->resourceDepot;
+
+		if (_theBases[base]->owner == _self &&
+			depot &&                // should never be null, but we check anyway
+			(depot->isCompleted() || UnitUtil::IsMorphedBuildingType(depot->getType())))
+		{
+			count += base->getGeysers().size();
 		}
 	}
-	
 
 	return count;
 }
@@ -1265,41 +1185,38 @@ void InformationManager::getMyGasCounts(int & nRefineries, int & nFreeGeysers)
 {
 	int refineries = 0;
 	int geysers = 0;
-	for (auto& area : bwemMap.Areas())
+
+	for (BWTA::BaseLocation * base : BWTA::getBaseLocations())
 	{
-		for (const auto& base : area.Bases())
+		BWAPI::Unit depot = _theBases[base]->resourceDepot;
+
+		if (_theBases[base]->owner == _self &&
+			depot &&                // should never be null, but we check anyway
+			(depot->isCompleted() || UnitUtil::IsMorphedBuildingType(depot->getType())))
 		{
-			BWAPI::Unit depot = _theBases[&base]->resourceDepot;
+			// Recalculate the base's geysers every time.
+			// This is a slow but accurate way to work around the BWAPI geyser bug.
+			// To save cycles, call findGeysers() only when necessary (e.g. a refinery is destroyed).
+			_theBases[base]->findGeysers();
 
-			if (_theBases[&base]->owner == _self &&
-				depot &&                // should never be null, but we check anyway
-				(depot->isCompleted() || UnitUtil::IsMorphedBuildingType(depot->getType())))
+			for (const auto geyser : _theBases[base]->getGeysers())
 			{
-				// Recalculate the base's geysers every time.
-				// This is a slow but accurate way to work around the BWAPI geyser bug.
-				// To save cycles, call findGeysers() only when necessary (e.g. a refinery is destroyed).
-				_theBases[&base]->findGeysers();
-
-				for (const auto geyser : _theBases[&base]->getGeysers())
+				if (geyser && geyser->exists())
 				{
-					if (geyser && geyser->exists())
+					if (geyser->getPlayer() == _self &&
+						geyser->getType().isRefinery() &&
+						geyser->isCompleted())
 					{
-						if (geyser->getPlayer() == _self &&
-							geyser->getType().isRefinery() &&
-							geyser->isCompleted())
-						{
-							++refineries;
-						}
-						else if (geyser->getPlayer() == BWAPI::Broodwar->neutral())
-						{
-							++geysers;
-						}
+						++refineries;
+					}
+					else if (geyser->getPlayer() == BWAPI::Broodwar->neutral())
+					{
+						++geysers;
 					}
 				}
 			}
 		}
 	}
-	
 
 	nRefineries = refineries;
 	nFreeGeysers = geysers;
@@ -1541,44 +1458,41 @@ void InformationManager::drawBaseInformation(int x, int y)
 	int yy = y;
 
 	BWAPI::Broodwar->drawTextScreen(x, yy, "%cBases", white);
-	for (auto& area : bwemMap.Areas())
+
+	for (auto * base : BWTA::getBaseLocations())
 	{
-		for (const auto& base : area.Bases())
+		yy += 10;
+
+		char color = gray;
+
+		char inferredChar = ' ';
+		BWAPI::Player player = _theBases[base]->owner;
+		if (player == _self)
 		{
-			yy += 10;
-
-			char color = gray;
-
-			char inferredChar = ' ';
-			BWAPI::Player player = _theBases[&base]->owner;
-			if (player == _self)
-			{
-				color = green;
-			}
-			else if (player == _enemy)
-			{
-				color = orange;
-				if (_theBases[&base]->resourceDepot == nullptr)
-				{
-					inferredChar = '?';
-				}
-			}
-
-			char baseCode = ' ';
-			if (&base == getMyMainBaseLocation())
-			{
-				baseCode = 'M';
-			}
-			else if (&base == _myNaturalBaseLocation)
-			{
-				baseCode = 'N';
-			}
-
-			BWAPI::TilePosition pos = base.Location();
-			BWAPI::Broodwar->drawTextScreen(x, yy, "%c%d, %d%c%c", color, pos.x, pos.y, inferredChar, baseCode);
+			color = green;
 		}
+		else if (player == _enemy)
+		{
+			color = orange;
+			if (_theBases[base]->resourceDepot == nullptr)
+			{
+				inferredChar = '?';
+			}
+		}
+
+		char baseCode = ' ';
+		if (base == getMyMainBaseLocation())
+		{
+			baseCode = 'M';
+		}
+		else if (base == _myNaturalBaseLocation)
+		{
+			baseCode = 'N';
+		}
+
+		BWAPI::TilePosition pos = base->getTilePosition();
+		BWAPI::Broodwar->drawTextScreen(x, yy, "%c%d, %d%c%c", color, pos.x, pos.y, inferredChar, baseCode);
 	}
-	
 }
 
 void InformationManager::maybeAddStaticDefense(BWAPI::Unit unit)
@@ -1708,17 +1622,13 @@ const UnitData & InformationManager::getUnitData(BWAPI::Player player) const
 
 Base* InformationManager::baseAt(BWAPI::TilePosition baseTilePosition)
 {
-	for(auto& area : bwemMap.Areas())
+	for (BWTA::BaseLocation * base : BWTA::getBaseLocations())
 	{
-		for (const auto& base : area.Bases())
+		if (closeEnough(base->getTilePosition(), baseTilePosition))
 		{
-			if (closeEnough(base.Location(), baseTilePosition))
-			{
-				return _theBases[&base];
-			}
+            return _theBases[base];
 		}
 	}
-	
 
     return nullptr;
 }

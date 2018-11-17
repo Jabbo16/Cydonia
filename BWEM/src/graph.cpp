@@ -13,7 +13,7 @@
 #include "neutral.h"
 #include <map>
 #include <deque>
-#include <BWAPI/Position.h>
+
 
 using namespace BWAPI;
 using namespace BWAPI::UnitTypes::Enum;
@@ -80,7 +80,6 @@ const Area * Graph::GetArea(WalkPosition w) const
 
 const Area * Graph::GetArea(TilePosition t) const
 {
-	if (!t.isValid()) t = GetMap()->Crop(t);
 	Area::id id = GetMap()->GetTile(t).AreaId();
 	return id > 0 ? GetArea(id) : nullptr;
 }

@@ -26,7 +26,7 @@ bool OpponentPlan::fastPlan(OpeningPlan plan)
 //      so we don't recognize all the rushes that we should.
 bool OpponentPlan::recognizeWorkerRush()
 {
-	BWAPI::Position myOrigin = BWAPI::Position(InformationManager::Instance().getMyMainBaseLocation()->Location());
+	BWAPI::Position myOrigin = InformationManager::Instance().getMyMainBaseLocation()->getPosition();
 
 	int enemyWorkerRushCount = 0;
 

@@ -1,7 +1,6 @@
 #pragma once
 
 #include "Common.h"
-#include <BWAPI/Filters.h>
 
 namespace UAlbertaBot
 {
@@ -62,8 +61,7 @@ public:
 
     bool isReady() const;
     bool isStuck() const;
-	void updateVulture();
 
-	int getLastAttackStartedAt() const { return lastAttackStartedAt; };
+    int getLastAttackStartedAt() const { return lastAttackStartedAt; };
 };
 }

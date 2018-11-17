@@ -23,7 +23,7 @@ void MicroHighTemplar::update()
 
 	// No base should be close against an edge, so this position should always be valid.
 	const BWAPI::Position gatherPoint =
-		BWAPI::Position(InformationManager::Instance().getMyMainBaseLocation()->Location()) - BWAPI::Position(32, 32);
+		InformationManager::Instance().getMyMainBaseLocation()->getPosition() - BWAPI::Position(32, 32);
 	UAB_ASSERT(gatherPoint.isValid(), "bad gather point");
 
 	BWAPI::Unitset mergeGroup;

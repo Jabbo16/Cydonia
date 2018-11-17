@@ -6,10 +6,6 @@
 #include "InformationManager.h"
 #include "StrategyManager.h"
 #include "UnitUtil.h"
-#include <BWAPI/UnitType.h>
-#include <BWAPI/Filters.h>
-#include <BWAPI/Unitset.h>
-#include <BWAPI/Player.h>
 
 namespace UAlbertaBot
 {
@@ -33,6 +29,7 @@ class CombatCommander
 	void            updateAttackSquads();
     void            updateDropSquads();
 	void            updateIdleSquad();
+    void            updateKamikazeSquad();
     void            updateDefuseSquads();
 
 	void			loadOrUnloadBunkers();
@@ -79,7 +76,7 @@ public:
 
 	CombatCommander();
 
-	void update(const BWAPI::Unitset& combatUnits);
+	void update(const BWAPI::Unitset & combatUnits);
 
 	void setAggression(bool aggressive) 
 	{ 
@@ -94,7 +91,7 @@ public:
 				}
 			}
 
-			Log().Get() << "Went aggressive with " << count << " combat units and " << UnitUtil::GetCompletedUnitCount(BWAPI::Broodwar->self()->getRace().getWorker()) << " workers";
+			Log().Get() << "Went aggressive with " << count << " combat units and " << UnitUtil::GetCompletedUnitCount(BWAPI::UnitTypes::Protoss_Probe) << " workers";
 		}
 
 		_goAggressive = aggressive;  

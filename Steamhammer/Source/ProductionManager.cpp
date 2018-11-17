@@ -5,7 +5,6 @@
 #include "TechCompleteProductionGoal.h"
 #include "UpgradeCompleteProductionGoal.h"
 #include "PathFinding.h"
-#include <BWAPI/Unit.h>
 
 using namespace UAlbertaBot;
 
@@ -35,7 +34,7 @@ void ProductionManager::setBuildOrder(const BuildOrder & buildOrder)
         // Don't let BOSS queue probes, it doesn't respect our limits
         if (BWAPI::Broodwar->getFrameCount() == 0 ||
             !buildOrder[i].isUnit() ||
-            buildOrder[i].getUnitType() != BWAPI::Broodwar->self()->getRace().getWorker())
+            buildOrder[i].getUnitType() != BWAPI::UnitTypes::Protoss_Probe)
         {
             _queue.queueAsLowestPriority(buildOrder[i]);
         }
@@ -104,31 +103,18 @@ void ProductionManager::onUnitDestroy(BWAPI::Unit unit)
 		Log().Get() << "Lost " << unit->getType() << " @ " << unit->getTilePosition();
 
 	// Replace static defenses if we have a forge and the location is still powered
-	if(BWAPI::Broodwar->self()->getRace() == BWAPI::Races::Protoss)
+	if (unit->getType() == BWAPI::UnitTypes::Protoss_Photon_Cannon &&
+        BWAPI::Broodwar->self()->allUnitCount(BWAPI::UnitTypes::Protoss_Forge) > 0 &&
+        BWAPI::Broodwar->hasPower(unit->getTilePosition(), BWAPI::UnitTypes::Protoss_Photon_Cannon))
 	{
-		if (unit->getType() == BWAPI::UnitTypes::Protoss_Photon_Cannon &&
-			BWAPI::Broodwar->self()->allUnitCount(BWAPI::UnitTypes::Protoss_Forge) > 0 &&
-			BWAPI::Broodwar->hasPower(unit->getTilePosition(), BWAPI::UnitTypes::Protoss_Photon_Cannon))
-		{
-			MacroAct m(BWAPI::UnitTypes::Protoss_Photon_Cannon);
-			m.setReservedPosition(unit->getTilePosition());
-			_queue.queueAsHighestPriority(m);
-			return;
-		}
+		MacroAct m(BWAPI::UnitTypes::Protoss_Photon_Cannon);
+		m.setReservedPosition(unit->getTilePosition());
+		_queue.queueAsHighestPriority(m);
+		return;
 	}
-	if (BWAPI::Broodwar->self()->getRace() == BWAPI::Races::Terran)
-	{
-		if (unit->getType() == BWAPI::UnitTypes::Terran_Missile_Turret &&
-			BWAPI::Broodwar->self()->allUnitCount(BWAPI::UnitTypes::Terran_Engineering_Bay) > 0)
-		{
-			MacroAct m(BWAPI::UnitTypes::Terran_Missile_Turret);
-			m.setReservedPosition(unit->getTilePosition());
-			_queue.queueAsHighestPriority(m);
-			return;
-		}
-	}
+	
 	// Gas steal
-	//if (unit->getType() == BWAPI::UnitTypes::Protoss_Assimilator) return;
+	if (unit->getType() == BWAPI::UnitTypes::Protoss_Assimilator) return;
 
 	// If we're zerg, we break out of the opening if and only if a key tech building is lost.
 	if (BWAPI::Broodwar->self()->getRace() == BWAPI::Races::Zerg)
@@ -231,84 +217,78 @@ void ProductionManager::manageBuildOrderQueue()
             !InformationManager::Instance().getEnemyMainBaseLocation())
         {
             // Queue a probe instead
-            _queue.queueAsHighestPriority(BWAPI::Broodwar->self()->getRace().getWorker());
+            _queue.queueAsHighestPriority(BWAPI::UnitTypes::Protoss_Probe);
             return;
         }
 
         // BOSS queues too many of some units, so cancel this one if we don't want it
 		if (_outOfBook && currentItem.macroAct.isUnit())
 		{
-            int nexuses = UnitUtil::GetAllUnitCount(BWAPI::Broodwar->self()->getRace().getResourceDepot());
+            int nexuses = UnitUtil::GetAllUnitCount(BWAPI::UnitTypes::Protoss_Nexus);
             BWAPI::UnitType type = currentItem.macroAct.getUnitType();
             bool skipThisItem = false;
 
-
-			//TODO similar for terran
             // Rules for gateways:
             // - Gateways we have must be in use
             // - Limit how many gateways we build in parallel depending on how many we have
             // - Only build at most 3 per nexus
             // - On Plasma, only build at most one non-proxy gateway
-			if(BWAPI::Broodwar->self()->getRace() == BWAPI::Races::Protoss)
-			{
-				if (type == BWAPI::UnitTypes::Protoss_Gateway)
-				{
-					int gatewaysBuilding = BuildingManager::Instance().numBeingBuilt(BWAPI::UnitTypes::Protoss_Gateway);
-					int gateways = UnitUtil::GetCompletedUnitCount(BWAPI::UnitTypes::Protoss_Gateway);
+            if (type == BWAPI::UnitTypes::Protoss_Gateway)
+            {
+                int gatewaysBuilding = BuildingManager::Instance().numBeingBuilt(BWAPI::UnitTypes::Protoss_Gateway);
+                int gateways = UnitUtil::GetCompletedUnitCount(BWAPI::UnitTypes::Protoss_Gateway);
+                
+                skipThisItem = gateways > 0 && (
+                    StrategyManager::Instance().getProductionSaturation(BWAPI::UnitTypes::Protoss_Gateway) < 0.76 ||
+                    gateways > nexuses * 3 ||
+                    gatewaysBuilding >= 4 ||
+                    (gateways < 10 && gatewaysBuilding >= 3) ||
+                    (gateways < 6 && gatewaysBuilding >= 2));
 
-					skipThisItem = gateways > 0 && (
-						StrategyManager::Instance().getProductionSaturation(BWAPI::UnitTypes::Protoss_Gateway) < 0.76 ||
-						gateways > nexuses * 3 ||
-						gatewaysBuilding >= 4 ||
-						(gateways < 10 && gatewaysBuilding >= 3) ||
-						(gateways < 6 && gatewaysBuilding >= 2));
+                // Special case for Plasma
+                // Since our combat units can't mineral walk, make sure we only build gateways at the proxy location,
+                // unless we have none
+                if (BWAPI::Broodwar->mapHash() == "6f5295624a7e3887470f3f2e14727b1411321a67" &&
+                    (gateways > 0 || gatewaysBuilding > 0) &&
+                    currentItem.macroAct.getMacroLocation() != MacroLocation::Proxy)
+                {
+                    skipThisItem = true;
+                }
+            }
 
-					// Special case for Plasma
-					// Since our combat units can't mineral walk, make sure we only build gateways at the proxy location,
-					// unless we have none
-					if (BWAPI::Broodwar->mapHash() == "6f5295624a7e3887470f3f2e14727b1411321a67" &&
-						(gateways > 0 || gatewaysBuilding > 0) &&
-						currentItem.macroAct.getMacroLocation() != MacroLocation::Proxy)
-					{
-						skipThisItem = true;
-					}
-				}
+            // Rules for stargates:
+            // - Stargates we have must be in use
+            // - Only build at most 2 at a time
+            // - Only build at most 3 per nexus
+            else if (type == BWAPI::UnitTypes::Protoss_Stargate)
+            {
+                int stargatesBuilding = BuildingManager::Instance().numBeingBuilt(BWAPI::UnitTypes::Protoss_Stargate);
+                int stargates = UnitUtil::GetCompletedUnitCount(BWAPI::UnitTypes::Protoss_Stargate) + stargatesBuilding;
 
-				// Rules for stargates:
-				// - Stargates we have must be in use
-				// - Only build at most 2 at a time
-				// - Only build at most 3 per nexus
-				else if (type == BWAPI::UnitTypes::Protoss_Stargate)
-				{
-					int stargatesBuilding = BuildingManager::Instance().numBeingBuilt(BWAPI::UnitTypes::Protoss_Stargate);
-					int stargates = UnitUtil::GetCompletedUnitCount(BWAPI::UnitTypes::Protoss_Stargate) + stargatesBuilding;
+                skipThisItem = stargates > 0 && (
+                    StrategyManager::Instance().getProductionSaturation(BWAPI::UnitTypes::Protoss_Stargate) < 0.76 ||
+                    stargates > nexuses * 2 ||
+                    stargatesBuilding >= 2);
+            }
 
-					skipThisItem = stargates > 0 && (
-						StrategyManager::Instance().getProductionSaturation(BWAPI::UnitTypes::Protoss_Stargate) < 0.76 ||
-						stargates > nexuses * 2 ||
-						stargatesBuilding >= 2);
-				}
+            // Rules for forges:
+            // - Only build at most one per 3 nexuses
+            else if (type == BWAPI::UnitTypes::Protoss_Forge)
+            {
+                int forges = UnitUtil::GetCompletedUnitCount(BWAPI::UnitTypes::Protoss_Forge) + BuildingManager::Instance().numBeingBuilt(BWAPI::UnitTypes::Protoss_Forge);
 
-				// Rules for forges:
-				// - Only build at most one per 3 nexuses
-				else if (type == BWAPI::UnitTypes::Protoss_Forge)
-				{
-					int forges = UnitUtil::GetCompletedUnitCount(BWAPI::UnitTypes::Protoss_Forge) + BuildingManager::Instance().numBeingBuilt(BWAPI::UnitTypes::Protoss_Forge);
+                skipThisItem = forges * 3 >= nexuses;
+            }
 
-					skipThisItem = forges * 3 >= nexuses;
-				}
+            // Rules for robotics facilities:
+            // - Only build at most one per 3 nexuses
+            else if (type == BWAPI::UnitTypes::Protoss_Robotics_Facility)
+            {
+                int robos = UnitUtil::GetCompletedUnitCount(BWAPI::UnitTypes::Protoss_Robotics_Facility) + BuildingManager::Instance().numBeingBuilt(BWAPI::UnitTypes::Protoss_Robotics_Facility);
 
-				// Rules for robotics facilities:
-				// - Only build at most one per 3 nexuses
-				else if (type == BWAPI::UnitTypes::Protoss_Robotics_Facility)
-				{
-					int robos = UnitUtil::GetCompletedUnitCount(BWAPI::UnitTypes::Protoss_Robotics_Facility) + BuildingManager::Instance().numBeingBuilt(BWAPI::UnitTypes::Protoss_Robotics_Facility);
+                skipThisItem = robos * 3 >= nexuses;
+            }
 
-					skipThisItem = robos * 3 >= nexuses;
-				}
-
-			}
-            
             if (skipThisItem)
 			{
 				_queue.doneWithHighestPriorityItem();
@@ -326,15 +306,15 @@ void ProductionManager::manageBuildOrderQueue()
 			continue;
 		}
 
-        
+        /*
 		// If this is an addon, turn it into a production goal.
-		/*if (currentItem.macroAct.isAddon())
+		if (currentItem.macroAct.isAddon())
 		{
 			_goals.push_front(ProductionGoal(currentItem.macroAct));
 			_queue.doneWithHighestPriorityItem();
 			continue;
-		}*/
-        
+		}
+        */
 
 		// The unit which can produce the currentItem. May be null.
         BWAPI::Unit producer = getProducer(currentItem.macroAct);
@@ -369,7 +349,7 @@ void ProductionManager::manageBuildOrderQueue()
 			!BuildingManager::Instance().typeIsStalled(currentItem.macroAct.getUnitType()))
 		{
 			// construct a temporary building object
-			Building b(currentItem.macroAct.getUnitType(), InformationManager::Instance().getMyMainBaseLocation()->Location());
+			Building b(currentItem.macroAct.getUnitType(), InformationManager::Instance().getMyMainBaseLocation()->getTilePosition());
 			b.macroAct = currentItem.macroAct;
 			b.macroLocation = currentItem.macroAct.getMacroLocation();
             b.isWorkerScoutBuilding = currentItem.isWorkerScoutBuilding;
@@ -389,28 +369,6 @@ void ProductionManager::manageBuildOrderQueue()
 		// if we can make the current item
 		if (canMake)
 		{
-			if(!currentItem.macroAct.isBuilding())
-			{
-				if(BWAPI::Broodwar->self()->supplyUsed() / 2 + currentItem.macroAct.supplyRequired() > BWAPI::Broodwar->self()->supplyTotal() / 2 )
-				{
-					bool found{};
-					for(auto u : BWAPI::Broodwar->self()->getUnits())
-					{
-						if(u->isCompleted() || !u->getType().isBuilding()) continue;
-						if(u->getType().supplyProvided() > 0)
-						{
-							found = true;
-							break;
-						}
-					}
-					if(!found)
-					{
-						const MacroAct supply{ BWAPI::Broodwar->self()->getRace().getSupplyProvider() };
-						queueMacroAction(supply);
-						return;
-					}
-				}
-			}
 			Log().Debug() << "Producing " << currentItem.macroAct;
 
 			// create it
@@ -435,7 +393,7 @@ void ProductionManager::manageBuildOrderQueue()
 		int productionJamFrameLimit = Config::Macro::ProductionJamFrameLimit;
 
 		// If we are still in the opening book, give some more leeway
-		if (!_outOfBook) productionJamFrameLimit *= 1.5;
+		if (!_outOfBook) productionJamFrameLimit *= 4;
 
 		// If we are blocked on resources, give some more leeway, we might just not have any money right now
 		else if (!meetsReservedResources(currentItem.macroAct)) productionJamFrameLimit *= 2;
@@ -591,7 +549,7 @@ BWAPI::Unit ProductionManager::getProducer(MacroAct act, BWAPI::Position closest
 	if (act.isWorker())
 	{
 		return getFarthestUnitFromPosition(candidateProducers,
-		                                   BWAPI::Position(InformationManager::Instance().getMyMainBaseLocation()->Location()));
+			InformationManager::Instance().getMyMainBaseLocation()->getPosition());
 	}
 	else
 	{
@@ -632,7 +590,7 @@ BWAPI::Unit ProductionManager::getClosestUnitToPosition(const std::vector<BWAPI:
 
 BWAPI::Unit ProductionManager::getFarthestUnitFromPosition(const std::vector<BWAPI::Unit> & units, BWAPI::Position farthest) const
 {
-	if (units.empty())
+	if (units.size() == 0)
 	{
 		return nullptr;
 	}
@@ -703,15 +661,15 @@ void ProductionManager::create(BWAPI::Unit producer, const BuildOrderItem & item
 		// By default, build in the main base.
 		// BuildingManager will override the location if it needs to.
 		// Otherwise it will find some spot near desiredLocation.
-		BWAPI::TilePosition desiredLocation = InformationManager::Instance().getMyMainBaseLocation()->Location();
+		BWAPI::TilePosition desiredLocation = InformationManager::Instance().getMyMainBaseLocation()->getTilePosition();
 
 		if (act.getMacroLocation() == MacroLocation::Natural ||
 			act.getMacroLocation() == MacroLocation::Wall)
 		{
-			const BWEM::Base * natural = InformationManager::Instance().getMyNaturalLocation();
+			BWTA::BaseLocation * natural = InformationManager::Instance().getMyNaturalLocation();
 			if (natural)
 			{
-				desiredLocation = natural->Location();
+				desiredLocation = natural->getTilePosition();
 			}
 		}
 		else if (act.getMacroLocation() == MacroLocation::Center)
@@ -836,7 +794,7 @@ void ProductionManager::predictWorkerMovement(const Building & b)
 				requirements.insert(req.first);
 
 		// If the tile position is unpowered, add a pylon
-		if (BWAPI::Broodwar->self()->getRace() == BWAPI::Races::Protoss && !BWAPI::Broodwar->hasPower(_predictedTilePosition, b.type))
+		if (!BWAPI::Broodwar->hasPower(_predictedTilePosition, b.type))
 			requirements.insert(BWAPI::UnitTypes::Protoss_Pylon);
 
 		// Check if we have any
@@ -1182,7 +1140,7 @@ void ProductionManager::doExtractorTrick()
 			{
 				// We can build a unit now: The extractor started, or another unit died somewhere.
 				// Well, there is one more condition: We need a larva.
-				BWAPI::Unit larva = getClosestLarvaToPosition(BWAPI::Position(InformationManager::Instance().getMyMainBaseLocation()->Location()));
+				BWAPI::Unit larva = getClosestLarvaToPosition(BWAPI::Position(InformationManager::Instance().getMyMainBaseLocation()->getTilePosition()));
 				if (larva && _extractorTrickUnitType != BWAPI::UnitTypes::None)
 				{
 					if (_extractorTrickUnitType == BWAPI::UnitTypes::Zerg_Zergling &&
@@ -1223,7 +1181,7 @@ void ProductionManager::doExtractorTrick()
 		// We did the extractor trick when we didn't need to, whether because the opening was
 		// miswritten or because units were lost before we got here.
 		// This special state lets us construct the unit we want anyway, bypassing the extractor.
-		BWAPI::Unit larva = getClosestLarvaToPosition(BWAPI::Position(InformationManager::Instance().getMyMainBaseLocation()->Location()));
+		BWAPI::Unit larva = getClosestLarvaToPosition(BWAPI::Position(InformationManager::Instance().getMyMainBaseLocation()->getTilePosition()));
 		if (larva &&
 			getFreeMinerals() >= _extractorTrickUnitType.mineralPrice() &&
 			getFreeGas() >= _extractorTrickUnitType.gasPrice())

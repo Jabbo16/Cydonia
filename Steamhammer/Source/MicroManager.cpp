@@ -5,10 +5,8 @@
 #include "UnitUtil.h"
 #include "MathUtil.h"
 #include "PathFinding.h"
-#include <BWAPI/Unit.h>
 
 using namespace UAlbertaBot;
-namespace { auto & bwemMap = BWEM::Map::Instance(); }
 
 MicroManager::MicroManager() 
 {
@@ -82,6 +80,7 @@ void MicroManager::getTargets(BWAPI::Unitset & targets) const
 
 	// For some orders, add enemies which are near our units.
 	if (order.getType() == SquadOrderTypes::Attack || 
+	    order.getType() == SquadOrderTypes::KamikazeAttack || 
         order.getType() == SquadOrderTypes::Defend)
 	{
 		for (const auto unit : _units)
@@ -149,51 +148,14 @@ bool MicroManager::shouldIgnoreTarget(BWAPI::Unit combatUnit, BWAPI::Unit target
                 if (target->getDistance(solitaryBunker) < (bunkerRange - ourRange + 32)) return true;
             }
         }
-    } else if (BWAPI::Broodwar->enemy()->getRace() == BWAPI::Races::Zerg)
-	{
-		// First try to find a solitary bunker
-		BWAPI::Unit solitarySunken = nullptr;
-		for (auto unit : BWAPI::Broodwar->enemy()->getUnits())
-		{
-			if (!unit->exists() || !unit->isVisible() || !unit->isCompleted()) continue;
-			if (unit->getType() != BWAPI::UnitTypes::Zerg_Sunken_Colony) continue;
-
-			// Break if this is the second bunker
-			if (solitarySunken)
-			{
-				solitarySunken = nullptr;
-				break;
-			}
-
-			solitarySunken = unit;
-		}
-
-		// If it was found, do the checks
-		if (solitarySunken)
-		{
-			// The target is the bunker: ignore it if we are closer to the order position
-			if (target->getType() == BWAPI::UnitTypes::Zerg_Sunken_Colony)
-			{
-				int unitDist = PathFinding::GetGroundDistance(combatUnit->getPosition(), order.getPosition());
-				int sunkenDist = PathFinding::GetGroundDistance(solitarySunken->getPosition(), order.getPosition());
-				if (unitDist != -1 && sunkenDist != -1 && unitDist < (sunkenDist - 224)) return true;
-			}
-
-			// The target isn't a bunker: ignore it if we can't attack it without coming under fire
-			else
-			{
-				int bunkerRange = 7 * 32;
-				int ourRange = std::max(0, UnitUtil::GetAttackRange(combatUnit, target) - 64); // be pessimistic and subtract two tiles
-				if (target->getDistance(solitarySunken) < (bunkerRange - ourRange + 32)) return true;
-			}
-		}
-	}
+    }
 
     // If we are already close to our order position, this is the best target we're going to get
     if (combatUnit->getDistance(order.getPosition()) <= 200) return false;
 
     // Ignore workers far from the order position when rushing or doing a kamikaze attack
-    if (StrategyManager::Instance().isRushing() && order.getType() == SquadOrderTypes::Attack)
+    if ((StrategyManager::Instance().isRushing() && order.getType() == SquadOrderTypes::Attack) ||
+        order.getType() == SquadOrderTypes::KamikazeAttack)
     {
         if (combatUnit->getDistance(order.getPosition()) > 500 &&
             target->getType().isWorker() &&
@@ -372,17 +334,15 @@ bool MicroManager::checkPositionWalkable(BWAPI::Position pos)
 
 bool MicroManager::unitNearNarrowChokepoint(BWAPI::Unit unit) const
 {
-	const auto area = bwemMap.GetArea(BWAPI::WalkPosition(unit->getPosition()));
-	if (!area) return false;
-	for (auto& choke : area->ChokePoints())
+	for (BWTA::Chokepoint * choke : BWTA::getChokepoints())
 	{
-		if (BWAPI::Position(choke->Geometry().front()).getDistance(BWAPI::Position(choke->Geometry().back()))  < 64 &&
-			unit->getDistance(BWAPI::Position(choke->Center())) < 64)
+		if (choke->getWidth() < 64 &&
+            unit->getDistance(choke->getCenter()) < 64)
 		{
 			return true;
 		}
 	}
-	
+
 	return false;
 }
 

@@ -173,11 +173,9 @@ namespace UAlbertaBot {
 
         bool kite = false;
         if (fu.attackCooldownRemaining) {
-            if ((fu.unitType == BWAPI::UnitTypes::Terran_Vulture &&
-				fu.attackCooldownRemaining <= BWAPI::UnitTypes::Protoss_Dragoon.groundWeapon().damageCooldown() - 6) ||
+            if (fu.unitType == BWAPI::UnitTypes::Terran_Vulture ||
                 (fu.unitType == BWAPI::UnitTypes::Protoss_Dragoon &&
-                fu.attackCooldownRemaining <= BWAPI::UnitTypes::Protoss_Dragoon.groundWeapon().damageCooldown() - 9) || (fu.unitType == BWAPI::UnitTypes::Terran_Marine &&
-					fu.attackCooldownRemaining <= BWAPI::UnitTypes::Terran_Marine.groundWeapon().damageCooldown() - 7))
+                fu.attackCooldownRemaining <= BWAPI::UnitTypes::Protoss_Dragoon.groundWeapon().damageCooldown() - 9))
             {
                 kite = true;
             }

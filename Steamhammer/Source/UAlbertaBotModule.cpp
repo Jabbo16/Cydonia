@@ -30,6 +30,11 @@ void UAlbertaBotModule::onStart()
     // Initialize BOSS, the Build Order Search System
     BOSS::init();
 
+	// Call BWTA to read and analyze the current map.
+	// Very slow if the map has not been seen before, so that info is not cached.
+	BWTA::readMap();
+	BWTA::analyze();
+
 	// BWEM map init
 	bwemMap.Initialize(BWAPI::BroodwarPtr);
 	bwemMap.EnableAutomaticPathAnalysis();
@@ -62,7 +67,7 @@ void UAlbertaBotModule::onStart()
         BWAPI::Broodwar->enableFlag(BWAPI::Flag::UserInput);
     }
 
-	Log().Get() << "I am Cydonia, you are " << InformationManager::Instance().getEnemyName() << ", we're in " << BWAPI::Broodwar->mapFileName();
+	Log().Get() << "I am Locutus of Borg, you are " << InformationManager::Instance().getEnemyName() << ", we're in " << BWAPI::Broodwar->mapFileName();
 
 	StrategyManager::Instance().initializeOpening();    // may depend on config and/or opponent model
 

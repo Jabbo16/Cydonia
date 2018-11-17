@@ -1,10 +1,10 @@
 #pragma once
 
+#include <BWTA.h>
 #include <vector>
 
 #include "Common.h"
 #include "DistanceMap.h"
-#include <BWAPI/Filters.h>
 
 // Keep track of map information, like what tiles are walkable or buildable.
 
@@ -52,7 +52,7 @@ class MapTools
 
     void				setBWAPIMapData();					// reads in the map data from bwapi and stores it in our map format
 
-	const BWEM::Base* nextExpansion(bool hidden, bool wantMinerals, bool wantGas);
+	BWTA::BaseLocation *nextExpansion(bool hidden, bool wantMinerals, bool wantGas);
 
 public:
 
@@ -62,7 +62,7 @@ public:
 	int		getGroundTileDistance(BWAPI::Position from, BWAPI::Position to);
 	int		getGroundDistance(BWAPI::Position from, BWAPI::Position to);
 
-    int     closestBaseDistance(const BWEM::Base* base, std::vector<const BWEM::Base*> bases);
+    int     closestBaseDistance(BWTA::BaseLocation * base, std::vector<BWTA::BaseLocation*> bases);
 
 	// Pass only valid tiles to these routines!
 	bool	isTerrainWalkable(BWAPI::TilePosition tile) const { return _terrainWalkable[tile.x][tile.y]; };
@@ -77,7 +77,7 @@ public:
 
 	void	drawHomeDistanceMap();
 
-	BWAPI::TilePosition getNextExpansion(bool hidden, bool wantMinerals, bool wantGas);
+	BWAPI::TilePosition	getNextExpansion(bool hidden, bool wantMinerals, bool wantGas);
 
 	bool	hasIslandBases() const { return _hasIslandBases; };
 };

@@ -151,7 +151,7 @@ void GameCommander::update()
             }
         }
 
-        Log().Get() << "Summary: " << count << " combat units, " << UnitUtil::GetCompletedUnitCount(BWAPI::Broodwar->self()->getRace().getWorker()) << " workers, " << BWAPI::Broodwar->self()->minerals() << " minerals, " << BWAPI::Broodwar->self()->gas() << " gas";
+        Log().Get() << "Summary: " << count << " combat units, " << UnitUtil::GetCompletedUnitCount(BWAPI::UnitTypes::Protoss_Probe) << " workers, " << BWAPI::Broodwar->self()->minerals() << " minerals, " << BWAPI::Broodwar->self()->gas() << " gas";
     }
 }
 
@@ -515,7 +515,7 @@ bool GameCommander::surrenderMonkey()
 	// Terran does not float buildings, so we check whether the enemy can attack ground.
 
 	// 1. Our cash.
-	if (UnitUtil::GetAllUnitCount(BWAPI::Broodwar->self()->getRace().getResourceDepot()) > 0 && BWAPI::Broodwar->self()->minerals() >= 50)
+	if (UnitUtil::GetAllUnitCount(BWAPI::UnitTypes::Protoss_Nexus) > 0 && BWAPI::Broodwar->self()->minerals() >= 50)
 	{
 		return false;
 	}

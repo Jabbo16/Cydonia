@@ -1,10 +1,4 @@
 #include "UnitUtil.h"
-#include <BWAPI/UnitCommand.h>
-#include <BWAPI/UnitType.h>
-#include <BWAPI/WeaponType.h>
-#include <BWAPI/DamageType.h>
-#include <BWAPI/Unit.h>
-#include <BWAPI/Game.h>
 
 using namespace UAlbertaBot;
 

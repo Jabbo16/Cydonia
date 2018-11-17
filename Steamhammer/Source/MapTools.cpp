@@ -2,8 +2,6 @@
 
 #include "BuildingPlacer.h"
 #include "InformationManager.h"
-#include <BWAPI/AIModule.h>
-#include <BWAPI/AIModule.h>
 
 const double pi = 3.14159265358979323846;
 
@@ -24,18 +22,15 @@ MapTools::MapTools()
 	setBWAPIMapData();
 
 	_hasIslandBases = false;
-	for(auto& area : bwemMap.Areas())
+	for (BWTA::BaseLocation * base : BWTA::getBaseLocations())
 	{
-		for (auto& base : area.Bases())
+		if (base->isIsland())
 		{
-			if (base.GetArea()->AccessibleNeighbours().empty())
-			{
-				_hasIslandBases = true;
-				break;
-			}
+			_hasIslandBases = true;
+			break;
 		}
 	}
-	
+
     // Get all of the BWEM chokepoints
     std::set<const BWEM::ChokePoint*> chokes;
     for (const auto & area : bwemMap.Areas())
@@ -373,7 +368,7 @@ void MapTools::drawHomeDistanceMap()
     }
 }
 
-const BWEM::Base* MapTools::nextExpansion(bool hidden, bool wantMinerals, bool wantGas)
+BWTA::BaseLocation * MapTools::nextExpansion(bool hidden, bool wantMinerals, bool wantGas)
 {
 	UAB_ASSERT(wantMinerals || wantGas, "unwanted expansion");
 
@@ -382,113 +377,109 @@ const BWEM::Base* MapTools::nextExpansion(bool hidden, bool wantMinerals, bool w
 	BWAPI::Player enemy = BWAPI::Broodwar->enemy();
 
 	// We'll go through the bases and pick the one with the best score.
-	const BWEM::Base * bestBase = nullptr;
+	BWTA::BaseLocation * bestBase = nullptr;
 	double bestScore = -999999.0;
 	
     auto myBases = InformationManager::Instance().getMyBases();
     auto enemyBases = InformationManager::Instance().getEnemyBases(); // may be empty
 
-	for(auto& area : bwemMap.Areas())
-	{
-		for (const auto& base : area.Bases())
+    for (BWTA::BaseLocation * base : BWTA::getBaseLocations())
+    {
+		double score = 0.0;
+
+        // Do we demand a gas base?
+		if (wantGas && (base->isMineralOnly() || base->gas() == 0))
 		{
-			double score = 0.0;
-
-			// Do we demand a gas base?
-			if (wantGas && (base.Geysers().empty()))
-			{
-				continue;
-			}
-
-			// Do we demand a mineral base?
-			// The constant is an arbitrary limit "enough minerals to be worth it".
-			/*if (wantMinerals && base->minerals() < 500)
-			{
-				continue;
-			}*/
-
-			// Don't expand to an existing base.
-			if (InformationManager::Instance().getBaseOwner(&base) != BWAPI::Broodwar->neutral())
-			{
-				continue;
-			}
-
-			// Don't expand to a spider-mined base.
-			if (InformationManager::Instance().getBase(&base)->spiderMined)
-			{
-				continue;
-			}
-
-			BWAPI::TilePosition tile = base.Location();
-			bool buildingInTheWay = false;
-
-			for (int x = 0; x < player->getRace().getCenter().tileWidth(); ++x)
-			{
-				for (int y = 0; y < player->getRace().getCenter().tileHeight(); ++y)
-				{
-					if (BuildingPlacer::Instance().isReserved(tile.x + x, tile.y + y))
-					{
-						// This happens if we were already planning to expand here. Try somewhere else.
-						buildingInTheWay = true;
-						break;
-					}
-
-					// TODO bug: this doesn't include enemy buildings which are known but out of sight
-					for (const auto unit : BWAPI::Broodwar->getUnitsOnTile(BWAPI::TilePosition(tile.x + x, tile.y + y)))
-					{
-						if (unit->getType().isBuilding() && !unit->isLifted())
-						{
-							buildingInTheWay = true;
-							break;
-						}
-					}
-				}
-			}
-
-			if (buildingInTheWay)
-			{
-				continue;
-			}
-
-			// Want to be close to our own base (unless this is to be a hidden base).
-			double distanceFromUs = closestBaseDistance(&base, myBases);
-
-			// if it is not connected, continue
-			if (distanceFromUs < 0)
-			{
-				continue;
-			}
-
-			// Want to be far from the enemy base.
-			double distanceFromEnemy = std::max(0, closestBaseDistance(&base, enemyBases));
-
-			// Add up the score.
-			score = hidden ? (distanceFromEnemy + distanceFromUs / 2.0) : (distanceFromEnemy / 1.5 - distanceFromUs);
-
-			/*// More resources -> better.
-			if (wantMinerals)
-			{
-				score += 0.01 * base->minerals();
-			}
-			if (wantGas)
-			{
-				score += 0.02 * base->gas();
-			}*/
-			// Big penalty for enemy buildings in the same region.
-			if (InformationManager::Instance().isEnemyBuildingInRegion(base.GetArea(), false))
-			{
-				score -= 100.0;
-			}
-
-			// BWAPI::Broodwar->printf("base score %d, %d -> %f",  tile.x, tile.y, score);
-			if (score > bestScore)
-			{
-				bestBase = &base;
-				bestScore = score;
-			}
+			continue;
 		}
-	}
-  
+
+		// Do we demand a mineral base?
+		// The constant is an arbitrary limit "enough minerals to be worth it".
+		if (wantMinerals && base->minerals() < 500)
+		{
+			continue;
+		}
+
+		// Don't expand to an existing base.
+		if (InformationManager::Instance().getBaseOwner(base) != BWAPI::Broodwar->neutral())
+		{
+			continue;
+		}
+
+        // Don't expand to a spider-mined base.
+        if (InformationManager::Instance().getBase(base)->spiderMined)
+        {
+            continue;
+        }
+        
+		BWAPI::TilePosition tile = base->getTilePosition();
+        bool buildingInTheWay = false;
+
+        for (int x = 0; x < player->getRace().getCenter().tileWidth(); ++x)
+        {
+			for (int y = 0; y < player->getRace().getCenter().tileHeight(); ++y)
+            {
+				if (BuildingPlacer::Instance().isReserved(tile.x + x, tile.y + y))
+				{
+					// This happens if we were already planning to expand here. Try somewhere else.
+					buildingInTheWay = true;
+					break;
+				}
+
+				// TODO bug: this doesn't include enemy buildings which are known but out of sight
+				for (const auto unit : BWAPI::Broodwar->getUnitsOnTile(BWAPI::TilePosition (tile.x + x, tile.y + y)))
+                {
+                    if (unit->getType().isBuilding() && !unit->isLifted())
+                    {
+                        buildingInTheWay = true;
+                        break;
+                    }
+                }
+            }
+        }
+            
+        if (buildingInTheWay)
+        {
+            continue;
+        }
+
+        // Want to be close to our own base (unless this is to be a hidden base).
+        double distanceFromUs = closestBaseDistance(base, myBases);
+
+        // if it is not connected, continue
+		if (distanceFromUs < 0)
+        {
+            continue;
+        }
+
+		// Want to be far from the enemy base.
+        double distanceFromEnemy = std::max(0, closestBaseDistance(base, enemyBases));
+
+		// Add up the score.
+		score = hidden ? (distanceFromEnemy + distanceFromUs / 2.0) : (distanceFromEnemy / 1.5 - distanceFromUs);
+
+		// More resources -> better.
+		if (wantMinerals)
+		{
+			score += 0.01 * base->minerals();
+		}
+		if (wantGas)
+		{
+			score += 0.02 * base->gas();
+		}
+		// Big penalty for enemy buildings in the same region.
+		if (InformationManager::Instance().isEnemyBuildingInRegion(base->getRegion(), false))
+		{
+			score -= 100.0;
+		}
+
+		// BWAPI::Broodwar->printf("base score %d, %d -> %f",  tile.x, tile.y, score);
+		if (score > bestScore)
+        {
+            bestBase = base;
+			bestScore = score;
+		}
+    }
 
     if (bestBase)
     {
@@ -502,12 +493,12 @@ const BWEM::Base* MapTools::nextExpansion(bool hidden, bool wantMinerals, bool w
 	return nullptr;
 }
 
-int MapTools::closestBaseDistance(const BWEM::Base * base, std::vector<const BWEM::Base*> bases)
+int MapTools::closestBaseDistance(BWTA::BaseLocation * base, std::vector<BWTA::BaseLocation*> bases)
 {
     int closestDistance = -1;
     for (auto other : bases)
     {
-        int dist = getGroundTileDistance(BWAPI::Position(base->Location()), BWAPI::Position(other->Location()));
+        int dist = getGroundTileDistance(base->getPosition(), other->getPosition());
         if (dist >= 0 && (dist < closestDistance || closestDistance == -1))
             closestDistance = dist;
     }
@@ -517,11 +508,11 @@ int MapTools::closestBaseDistance(const BWEM::Base * base, std::vector<const BWE
 
 BWAPI::TilePosition MapTools::getNextExpansion(bool hidden, bool wantMinerals, bool wantGas)
 {
-	const BWEM::Base * base = nextExpansion(hidden, wantMinerals, wantGas);
+	BWTA::BaseLocation * base = nextExpansion(hidden, wantMinerals, wantGas);
 	if (base)
 	{
 		// BWAPI::Broodwar->printf("foresee base @ %d, %d", base->getTilePosition().x, base->getTilePosition().y);
-		return base->Location();
+		return base->getTilePosition();
 	}
 	return BWAPI::TilePositions::None;
 }

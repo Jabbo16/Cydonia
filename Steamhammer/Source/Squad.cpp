@@ -5,11 +5,9 @@
 #include "MathUtil.h"
 #include "MapGrid.h"
 #include "PathFinding.h"
-#include <BWAPI/Unit.h>
-#include <BWAPI/Player.h>
 
 using namespace UAlbertaBot;
-namespace { auto & bwemMap = BWEM::Map::Instance(); }
+
 Squad::Squad()
 	: _name("Default")
 	, _combatSquad(false)
@@ -542,17 +540,17 @@ BWAPI::Position Squad::calcRegroupPosition()
 	if (regroup == BWAPI::Position(0,0))
 	{
 		// Retreat to the main base (guaranteed not null, even if the buildings were destroyed).
-		regroup = BWAPI::Position(InformationManager::Instance().getMyMainBaseLocation()->GetArea()->Top());
+		regroup = BWTA::getRegion(InformationManager::Instance().getMyMainBaseLocation()->getTilePosition())->getCenter();
 
 		// If the natural has been taken, retreat there instead.
-		const BWEM::Base * natural = InformationManager::Instance().getMyNaturalLocation();
+		BWTA::BaseLocation * natural = InformationManager::Instance().getMyNaturalLocation();
 		if (natural && InformationManager::Instance().getBaseOwner(natural) == BWAPI::Broodwar->self())
 		{
 			// If we have a wall, use its door location
 			if (BuildingPlacer::Instance().getWall().exists())
 				regroup = BuildingPlacer::Instance().getWall().gapCenter;
 			else
-				regroup = BWAPI::Position(natural->GetArea()->Top());
+				regroup = BWTA::getRegion(natural->getTilePosition())->getCenter();
 		}
 	}
 
@@ -852,125 +850,70 @@ int Squad::runCombatSim(BWAPI::Position targetPosition)
     // - The enemy doesn't have the marine range upgrade
     // - The enemy doesn't have any other units in the combat sim radius
     // - None of our goons are moving into range of an enemy bunker (unless they are in a bunker attack squad)
-    bool ignoreBunkersSunkens = true;
-    if (ignoreBunkersSunkens)
+    bool ignoreBunkers = 
+        BWAPI::Broodwar->self()->getUpgradeLevel(BWAPI::UpgradeTypes::Singularity_Charge) &&
+        !InformationManager::Instance().enemyHasInfantryRangeUpgrade();
+    if (ignoreBunkers)
     {
-		if(BWAPI::Broodwar->enemy()->getRace() == BWAPI::Races::Terran){
-			// Gather enemy bunker positions and break if the enemy has other units
-			std::vector<BWAPI::Position> bunkers;
-			for (auto const & ui : InformationManager::Instance().getUnitInfo(BWAPI::Broodwar->enemy()))
-			{
-				if (UnitUtil::IsCombatUnit(ui.second.type) && ui.second.type != BWAPI::UnitTypes::Terran_Bunker &&
-					!ui.second.goneFromLastPosition && ui.second.lastPosition.getApproxDistance(enemyVanguard) < _combatSimRadius)
-				{
-					ignoreBunkersSunkens = false;
-					goto breakBunkerCheck;
-				}
+        // Gather enemy bunker positions and break if the enemy has other units
+        std::vector<BWAPI::Position> bunkers;
+        for (auto const & ui : InformationManager::Instance().getUnitInfo(BWAPI::Broodwar->enemy()))
+        {
+            if (UnitUtil::IsCombatUnit(ui.second.type) && ui.second.type != BWAPI::UnitTypes::Terran_Bunker &&
+                !ui.second.goneFromLastPosition && ui.second.lastPosition.getApproxDistance(enemyVanguard) < _combatSimRadius)
+            {
+                ignoreBunkers = false;
+                goto breakBunkerCheck;
+            }
 
-				if (ui.second.type == BWAPI::UnitTypes::Terran_Bunker &&
-					!ui.second.goneFromLastPosition)
-				{
-					bunkers.push_back(ui.second.lastPosition);
-				}
-			}
-			if (!bunkers.empty())
-			{
-				// Make sure all of our units are goons and out of range of the bunker
-				for (auto & unit : _units)
-				{
-					// If the unit is part of a bunker attack squad, all is well
-					// They are allowed to move through the attack range of the bunker
-					if (getBunkerRunBySquad(unit)) continue;
+            if (ui.second.type == BWAPI::UnitTypes::Terran_Bunker &&
+                !ui.second.goneFromLastPosition)
+            {
+                bunkers.push_back(ui.second.lastPosition);
+            }
+        }
+        if (!bunkers.empty())
+        {
+            // Make sure all of our units are goons and out of range of the bunker
+            for (auto & unit : _units)
+            {
+                // If the unit is part of a bunker attack squad, all is well
+                // They are allowed to move through the attack range of the bunker
+                if (getBunkerRunBySquad(unit)) continue;
 
-					if (unit->getType() != BWAPI::UnitTypes::Terran_Vulture)
-					{
-						Log().Debug() << "Not ignoring bunker; have a non-vulture";
-						ignoreBunkersSunkens = false;
-						goto breakBunkerCheck;
-					}
+                if (unit->getType() != BWAPI::UnitTypes::Protoss_Dragoon)
+                {
+                    Log().Debug() << "Not ignoring bunker; have a non-goon";
+                    ignoreBunkers = false;
+                    goto breakBunkerCheck;
+                }
 
-					BWAPI::Position anticipatedVulturePosition =
-						InformationManager::Instance().predictUnitPosition(unit, BWAPI::Broodwar->getLatencyFrames());
+                BWAPI::Position anticipatedDragoonPosition = 
+                    InformationManager::Instance().predictUnitPosition(unit, BWAPI::Broodwar->getLatencyFrames());
 
-					for (auto bunkerPosition : bunkers)
-					{
-						if (MathUtil::EdgeToEdgeDistance(
-							BWAPI::UnitTypes::Terran_Vulture,
-							anticipatedVulturePosition,
-							BWAPI::UnitTypes::Terran_Bunker,
-							bunkerPosition) <= ((5 * 32) + 1))
-						{
-							Log().Debug() << "Not ignoring bunker; have a vulture entering bunker range";
+                for (auto bunkerPosition : bunkers)
+                {
+                    if (MathUtil::EdgeToEdgeDistance(
+                            BWAPI::UnitTypes::Protoss_Dragoon, 
+                            anticipatedDragoonPosition, 
+                            BWAPI::UnitTypes::Terran_Bunker, 
+                            bunkerPosition) <= ((5 * 32) + 1))
+                    {
+                        Log().Debug() << "Not ignoring bunker; have a goon entering bunker range";
 
-							ignoreBunkersSunkens = false;
-							goto breakBunkerCheck;
-						}
-					}
-				}
-			}
-		breakBunkerCheck:;
-		}
-		else if (BWAPI::Broodwar->enemy()->getRace() == BWAPI::Races::Zerg) {
-			// Gather enemy bunker positions and break if the enemy has other units
-			std::vector<BWAPI::Position> sunkens;
-			for (auto const & ui : InformationManager::Instance().getUnitInfo(BWAPI::Broodwar->enemy()))
-			{
-				if (UnitUtil::IsCombatUnit(ui.second.type) && ui.second.type != BWAPI::UnitTypes::Zerg_Sunken_Colony &&
-					!ui.second.goneFromLastPosition && ui.second.lastPosition.getApproxDistance(enemyVanguard) < _combatSimRadius)
-				{
-					ignoreBunkersSunkens = false;
-					goto breaSunkenCheck;
-				}
-
-				if (ui.second.type == BWAPI::UnitTypes::Zerg_Sunken_Colony &&
-					!ui.second.goneFromLastPosition)
-				{
-					sunkens.push_back(ui.second.lastPosition);
-				}
-			}
-			if (!sunkens.empty())
-			{
-				// Make sure all of our units are goons and out of range of the bunker
-				for (auto & unit : _units)
-				{
-					// If the unit is part of a bunker attack squad, all is well
-					// They are allowed to move through the attack range of the bunker
-					if (getBunkerRunBySquad(unit)) continue;
-
-					if (unit->getType() != BWAPI::UnitTypes::Terran_Vulture)
-					{
-						Log().Debug() << "Not ignoring bunker; have a non-vulture";
-						ignoreBunkersSunkens = false;
-						goto breaSunkenCheck;
-					}
-
-					BWAPI::Position anticipatedVulturePosition =
-						InformationManager::Instance().predictUnitPosition(unit, BWAPI::Broodwar->getLatencyFrames());
-
-					for (auto sunkenPosition : sunkens)
-					{
-						if (MathUtil::EdgeToEdgeDistance(
-							BWAPI::UnitTypes::Terran_Vulture,
-							anticipatedVulturePosition,
-							BWAPI::UnitTypes::Zerg_Sunken_Colony,
-							sunkenPosition) <= ((5 * 32) + 1))
-						{
-							Log().Debug() << "Not ignoring bunker; have a vulture entering sunken range";
-
-							ignoreBunkersSunkens = false;
-							goto breaSunkenCheck;
-						}
-					}
-				}
-			}
-		breaSunkenCheck:;
-		}
+                        ignoreBunkers = false;
+                        goto breakBunkerCheck;
+                    }
+                }
+            }
+        }
+    breakBunkerCheck:;
     }
 
     int radius = _combatSimRadius;
     if (StrategyManager::Instance().isRushing()) radius /= 2;
 
-    sim.setCombatUnits(ourVanguard->getPosition(), enemyVanguard, radius, _fightVisibleOnly, ignoreBunkersSunkens);
+    sim.setCombatUnits(ourVanguard->getPosition(), enemyVanguard, radius, _fightVisibleOnly, ignoreBunkers);
     return sim.simulateCombat(_lastRetreatSwitchVal);
 }
 
