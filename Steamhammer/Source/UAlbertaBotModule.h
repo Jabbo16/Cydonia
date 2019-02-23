@@ -15,8 +15,6 @@ namespace UAlbertaBot
 
 class UAlbertaBotModule : public BWAPI::AIModule
 {
-private:
-    bool    gameEnded;
 
 public:
 

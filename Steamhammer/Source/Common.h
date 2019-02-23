@@ -24,6 +24,7 @@
 #include "Config.h"
 #include "Logger.h"
 #include "UABAssert.h"
+inline  bool    gameEnded;
 
 BWAPI::AIModule * __NewAIModule();
 

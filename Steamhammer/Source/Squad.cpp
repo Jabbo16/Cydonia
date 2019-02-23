@@ -50,7 +50,8 @@ Squad::Squad(const std::string & name, SquadOrder order, size_t priority)
 
 Squad::~Squad()
 {
-    clear();
+	if(!gameEnded)
+		clear();
 }
 
 // TODO make a proper dispatch system for different orders
